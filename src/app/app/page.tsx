@@ -132,6 +132,9 @@ type GraphState = {
   viewMode: ViewMode;
   setViewMode: (m: ViewMode) => void;
 
+  edgeCornerRadius: number;
+  setEdgeCornerRadius: (r: number) => void;
+
   // Edge routing UI mode
   edgeMode: EdgeMode;
   setEdgeMode: (m: EdgeMode) => void;
@@ -679,6 +682,10 @@ const useGraph = create<GraphState>((set, get) => {
     viewMode: def.viewMode,
     setViewMode: (m: ViewMode) => set(() => ({ viewMode: m })),
 
+    // Corner radius for smoothstep edges
+    edgeCornerRadius: 50,
+    setEdgeCornerRadius: (r: number) => set(() => ({ edgeCornerRadius: r })),
+
     // Edge mode (default = Radius)
     edgeMode: def.edgeMode ?? 'radius',
     setEdgeMode: (m: 'radius' | 'bezier') =>
@@ -863,55 +870,34 @@ addLedger: () =>
       ? 'capacity'
       : 'linked';
 
-      const edgeMode = get().edgeMode; // add this to GraphState
-      const edgeType = edgeMode === 'radius' ? 'smoothstep' : 'bezier';
+  // ✅ Declare these BEFORE any edge object uses them
+  const isRadius = get().edgeMode === 'radius';
+  const corner = get().edgeCornerRadius ?? 50;
 
-// Build edge (uses current global edgeMode, and applies smoothstep rounding)
-const isRadius = get().edgeMode === 'radius';
+  const newEdge: Edge<GraphEdgeData> = {
+    id: `edge-${nanoid(8)}`,
+    source: c.source!,
+    target: c.target!,
+    sourceHandle: c.sourceHandle ?? undefined,
+    targetHandle: c.targetHandle ?? undefined,
+    label,
+    markerEnd: { type: MarkerType.ArrowClosed },
 
-const edgeToAdd: Edge<GraphEdgeData> = {
-  id: `edge-${nanoid(8)}`,
-  source: c.source!,
-  target: c.target!,
-  sourceHandle: c.sourceHandle ?? undefined,
-  targetHandle: c.targetHandle ?? undefined,
-  label,
-  markerEnd: { type: MarkerType.ArrowClosed },
+    // Edge render mode
+    type: isRadius ? 'smoothstep' : 'default',
 
-  // IMPORTANT: existing edges won't change unless you update them (see note below)
-  type: isRadius ? 'smoothstep' : 'default',
+    // smoothstep-only corner rounding
+    ...(isRadius ? ({ pathOptions: { borderRadius: corner } } as any) : {}),
 
-  // smoothstep-only corner rounding
-  ...(isRadius ? ({ pathOptions: { borderRadius: 50 } } as any) : {}),
+    style: {
+      strokeWidth: (c.source ?? '').startsWith('person') ? 3 : 2,
+      stroke: color,
+    },
+    data: { color },
+  };
 
-  style: {
-    strokeWidth: (c.source ?? '').startsWith('person') ? 3 : 2,
-    stroke: color,
-  },
-  data: { color },
-};
-
-// 1) Add the edge
-set((s) => ({ edges: addEdge(edgeToAdd, s.edges) }));
-
-const newEdge: Edge<GraphEdgeData> = {
-  id: `edge-${nanoid(8)}`,
-  source: c.source!,
-  target: c.target!,
-  sourceHandle: c.sourceHandle ?? undefined,
-  targetHandle: c.targetHandle ?? undefined,
-  label,
-  markerEnd: { type: MarkerType.ArrowClosed },
-  type: isRadius ? 'smoothstep' : 'default',
-  pathOptions: isRadius ? { borderRadius: 50 } : undefined,
-  style: {
-    strokeWidth: (c.source ?? '').startsWith('person') ? 3 : 2,
-    stroke: color,
-  },
-  data: { color },
-};
-
-   set((s) => ({ edges: addEdge(newEdge, s.edges) }));
+  // 1) Add the edge (ONCE)
+  set((s) => ({ edges: addEdge(newEdge, s.edges) }));
 
   // 2) Post-connect side-effects (titles/studio propagation only)
   const sourceKind = getNodeKindById(nodes, c.source);
@@ -1742,29 +1728,31 @@ function pill(): React.CSSProperties {
 }
 
 const BTN_H = 40;
+const BUREAU_GREEN = '#007231';
+const BUREAU_GREEN_DARK = '#005a27'; // tweak if you want
 
 const btnStyle: React.CSSProperties = {
-  height: BTN_H,
-  padding: '0 14px',
-  borderRadius: 14,
-  border: '1px solid rgba(0,0,0,0.10)',
-  background: 'white',
-  fontWeight: 600,
+  padding: '10px 14px',
+  borderRadius: 12,
+  border: '1px solid rgba(0,0,0,0.06)',
+  background: BUREAU_GREEN,
+  color: 'white',
+  fontWeight: 700,
   fontSize: 12,
-  opacity: 0.92,
-
+  lineHeight: 1,
+  height: 40,                 // keeps alignment clean
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  lineHeight: 1,
-  whiteSpace: 'nowrap',
+  gap: 8,
+  cursor: 'pointer',
+  boxShadow: '0 6px 14px rgba(0,0,0,0.06)',
 };
 
 const btnActiveStyle: React.CSSProperties = {
   ...btnStyle,
-  background: 'rgba(0,0,0,0.04)',
-  border: '1px solid rgba(0,0,0,0.18)',
-  opacity: 1,
+  background: BUREAU_GREEN_DARK,
+  border: '1px solid rgba(0,0,0,0.10)',
 };
 
 const dividerStyle: React.CSSProperties = {
@@ -2097,116 +2085,128 @@ const displayNodes = useMemo(() => {
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
       {/* Toolbar */}
-      <div
-        style={{
-          position: 'absolute',
-          zIndex: 10,
-          top: 12,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          display: 'flex',
-           alignItems: 'center',
-          gap: 8,
-          background: 'rgba(255,255,255,0.92)',
-          padding: 10,
-          borderRadius: 18,
-          border: '1px solid rgba(0,0,0,0.08)',
-          boxShadow: '0 14px 30px rgba(0,0,0,0.08)',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          maxWidth: 1040,
-          width: 'calc(100vw - 24px)',
-          backdropFilter: 'blur(6px)',
-        }}
-      >
-        {/* View buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <button
-            onClick={() => setViewMode('workflow')}
-            style={{
-              ...btnStyle,
-              background: viewMode === 'workflow' ? 'rgba(0,0,0,0.04)' : 'white',
-            }}
-          >
-            Workflow
-          </button>
-
-          <button
-            onClick={() => setViewMode('timeline')}
-            style={{
-              ...btnStyle,
-              background: viewMode === 'timeline' ? 'rgba(0,0,0,0.04)' : 'white',
-            }}
-          >
-            Timeline
-          </button>
-        </div>
-                <div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
-
-<div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-  
-
- <button
-  onClick={() => setEdgeMode('radius')}
-  style={edgeMode === 'radius' ? btnActiveStyle : btnStyle}
+<div
+  style={{
+    position: 'absolute',
+    zIndex: 10,
+    top: 12,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    background: 'rgba(255,255,255,0.92)',
+    padding: 10,
+    borderRadius: 18,
+    border: '1px solid rgba(0,0,0,0.08)',
+    boxShadow: '0 14px 30px rgba(0,0,0,0.08)',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    maxWidth: 1040,
+    width: 'calc(100vw - 24px)',
+    backdropFilter: 'blur(6px)',
+  }}
 >
-  Radius
-</button>
+  {/* View */}
+  <button
+    onClick={() => setViewMode('workflow')}
+    style={{
+      ...btnStyle,
+      background: viewMode === 'workflow' ? '#005a27' : '#007231',
+      color: 'white',
+    }}
+  >
+    Workflow
+  </button>
 
-<button
-  onClick={() => setEdgeMode('bezier')}
-  style={edgeMode === 'bezier' ? btnActiveStyle : btnStyle}
->
-  Bezier
-</button>
-<div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />    </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }} />
+  <button
+    onClick={() => setViewMode('timeline')}
+    style={{
+      ...btnStyle,
+      background: viewMode === 'timeline' ? '#005a27' : '#007231',
+      color: 'white',
+    }}
+  >
+    Timeline
+  </button>
 
-        <button onClick={addPerson} style={btnStyle}>
-          + Resource
-        </button>
-        
-        <button onClick={addProject} style={btnStyle}>
-          + Project
-        </button>
-        <button onClick={addBudget} style={btnStyle}>
-          + Budget
-        </button>
-        <button onClick={addTimeline} style={btnStyle}>
-          + Timeline
-        </button>
+  <div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
 
-<div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
-        {/* Turnover nodes hidden for MVP (Ledger replaces this) */}
-        
-        <button onClick={addLedger} style={btnStyle}>
-  + Ledger
-</button>
-<div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
+  {/* Connection type */}
+  <button
+    onClick={() => setEdgeMode('radius')}
+    style={{
+      ...btnStyle,
+      background: edgeMode === 'radius' ? '#005a27' : '#007231',
+      color: 'white',
+    }}
+  >
+    Radius
+  </button>
 
-        <button onClick={manualSave} style={btnStyle}>
-          Save
-        </button>
-        <button onClick={exportJSON} style={btnStyle}>
-          Export
-        </button>
-        <button onClick={importJSON} style={btnStyle}>
-          Import
-        </button>
+  <button
+    onClick={() => setEdgeMode('bezier')}
+    style={{
+      ...btnStyle,
+      background: edgeMode === 'bezier' ? '#005a27' : '#007231',
+      color: 'white',
+    }}
+  >
+    Bezier
+  </button>
 
-        <button
-          onClick={() => {
-            if (confirm('Reset graph? This will wipe the saved canvas.')) {
-              localStorage.removeItem(APP_STORAGE_KEY);
-              resetGraph();
-            }
-          }}
-          style={{ ...btnStyle, opacity: 0.75 }}
-        >
-          Reset
-        </button>
-      </div>
+  <div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
 
+  {/* Add nodes */}
+  <button onClick={addPerson} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+    + Resource
+  </button>
+
+  <button onClick={addProject} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+    + Project
+  </button>
+
+  <button onClick={addBudget} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+    + Budget
+  </button>
+
+  <button onClick={addTimeline} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+    + Timeline
+  </button>
+
+  <div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
+
+  <button onClick={addLedger} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+    + Ledger
+  </button>
+
+  <div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
+
+  {/* Save / I/O */}
+  <button onClick={manualSave} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+    Save
+  </button>
+
+  <button onClick={exportJSON} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+    Export
+  </button>
+
+  <button onClick={importJSON} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+    Import
+  </button>
+
+  <button
+    onClick={() => {
+      if (confirm('Reset graph? This will wipe the saved canvas.')) {
+        localStorage.removeItem(APP_STORAGE_KEY);
+        resetGraph();
+      }
+    }}
+    style={{ ...btnStyle, background: '#007231', color: 'white', opacity: 0.9 }}
+  >
+    Reset
+  </button>
+</div>
       {/* Inspector */}
       <div
         style={{

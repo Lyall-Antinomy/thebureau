@@ -79,15 +79,32 @@ export default function Home() {
               <div className="mt-1 opacity-70">We’ll be in touch.</div>
             </div>
           ) : (
-            <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
-              <input
-                className="w-full rounded-xl border border-black/10 px-4 py-3 text-sm outline-none focus:border-black/30"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                disabled={sending}
-              />
+            <form
+  className="flex flex-col gap-3"
+  onSubmit={async (e) => {
+    e.preventDefault();
+
+    try {
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, name: studio }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        // show server message if available
+        alert(json?.error ?? 'Failed to send. Try again.');
+        return;
+      }
+
+      setSent(true);
+    } catch {
+      alert('Network error. Try again.');
+    }
+  }}
+>
 
               <input
                 className="w-full rounded-xl border border-black/10 px-4 py-3 text-sm outline-none focus:border-black/30 focus:ring-2 focus:ring-[#007231]/20"
