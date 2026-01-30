@@ -15,13 +15,9 @@ export default function Home() {
         <div className="flex items-center justify-between">
           <div className="text-lg font-semibold tracking-tight">The Bureau •</div>
 
-          <a
-            href="/app"
-            className="text-sm opacity-60 hover:opacity-100 transition"
-            style={{ color: BUREAU_GREEN }}
-          >
-            Open app →
-          </a>
+        
+            app opening soon →
+          
         </div>
 
         <h1 className="mt-14 text-4xl font-medium leading-tight tracking-tight">
