@@ -16,7 +16,7 @@ export default function Home() {
           <div className="text-lg font-semibold tracking-tight">The Bureau •</div>
 
           <a
-            href="/app"
+            href="/"
             className="text-sm opacity-60 hover:opacity-100 transition"
             style={{ color: BUREAU_GREEN }}
           >
