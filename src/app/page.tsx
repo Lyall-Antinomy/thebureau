@@ -29,7 +29,7 @@ export default function Home() {
         </h1>
 
         <p className="mt-6 text-lg leading-relaxed opacity-80">
-          An executive visual operating layer for modern studios • People, projects, and time — all connected in one living map.
+          An executive visual operating layer for modern studios • People, projects, budgets, and time — Connected.
         </p>
 
         <div className="mt-10 rounded-2xl border border-black/10 p-4">
