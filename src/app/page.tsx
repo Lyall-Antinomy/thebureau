@@ -16,7 +16,7 @@ export default function Home() {
           <div className="text-lg font-semibold tracking-tight">The Bureau •</div>
 
         
-            app opening soon →
+            Opening soon →
           
         </div>
 
