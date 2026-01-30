@@ -7,7 +7,47 @@ const BUREAU_GREEN = '#007231';
 export default function Home() {
   const [email, setEmail] = useState('');
   const [studio, setStudio] = useState('');
+
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (sending) return;
+
+    setError(null);
+    setSending(true);
+
+    try {
+      const payload = {
+        email: email.trim().toLowerCase(),
+        studio: studio.trim() || undefined,
+      };
+
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || !json?.ok) {
+        setError(json?.error ?? 'Something went wrong. Please try again.');
+        setSending(false);
+        return;
+      }
+
+      setSent(true);
+    } catch {
+      setError('Network error. Please try again.');
+      setSending(false);
+      return;
+    }
+
+    setSending(false);
+  }
 
   return (
     <main className="min-h-screen bg-white text-black">
@@ -39,19 +79,14 @@ export default function Home() {
               <div className="mt-1 opacity-70">We’ll be in touch.</div>
             </div>
           ) : (
-            <form
-              className="flex flex-col gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                setSent(true);
-              }}
-            >
+            <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
               <input
                 className="w-full rounded-xl border border-black/10 px-4 py-3 text-sm outline-none focus:border-black/30"
                 placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                disabled={sending}
               />
 
               <input
@@ -59,24 +94,30 @@ export default function Home() {
                 placeholder="Studio name (optional)"
                 value={studio}
                 onChange={(e) => setStudio(e.target.value)}
+                disabled={sending}
               />
 
               <button
                 type="submit"
-                className="rounded-xl px-4 py-3 text-sm font-medium text-white transition hover:opacity-95"
-                style={{ background: '#007231' }}
+                className="rounded-xl px-4 py-3 text-sm font-medium text-white transition hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed"
+                style={{ background: BUREAU_GREEN }}
+                disabled={sending}
               >
-                Request access
+                {sending ? 'Sending…' : 'Request access'}
               </button>
 
-              <div className="text-xs opacity-50">No spam. No noise.</div>
+              {error ? (
+                <div className="text-xs" style={{ color: '#b00020' }}>
+                  {error}
+                </div>
+              ) : (
+                <div className="text-xs opacity-50">No spam. No noise.</div>
+              )}
             </form>
           )}
         </div>
 
-        <div className="mt-16 text-xs opacity-50">
-          © {new Date().getFullYear()} The Bureau
-        </div>
+        <div className="mt-16 text-xs opacity-50">© {new Date().getFullYear()} The Bureau</div>
       </div>
     </main>
   );
