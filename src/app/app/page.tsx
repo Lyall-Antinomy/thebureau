@@ -2522,7 +2522,7 @@ const displayNodes = useMemo(() => {
   <div style={{ fontSize: 26, fontWeight: 800, opacity: 0.75, letterSpacing: -0.9 }}>
     The Bureau •
   </div>
-  <div style={{ fontSize: 16, opacity: 0.4 }}>Navigate Business Reality</div>
+  <div style={{ fontSize: 16, opacity: 0.4 }}>Prototype Business Reality</div>
 </div>
 {/* Timeline Scrubber (Workflow view) */}
 {/* Time Scrubber */}
