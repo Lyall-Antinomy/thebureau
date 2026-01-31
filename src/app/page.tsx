@@ -69,9 +69,22 @@ export default function Home() {
           Navigate Business Reality •
         </h1>
 
-        <p className="mt-6 text-lg leading-relaxed opacity-80">
-          An executive visual operating layer for modern studios • People, projects, budgets, and time — Connected.
-        </p>
+      <div className="mt-6 space-y-3">
+  <p className="text-lg leading-relaxed opacity-80">
+    People. Projects. Budgets. Time. - All Connected.
+  </p>
+ <div className="mt-6 space-y-3">
+  <p className="text-base leading-relaxed opacity-80">
+    The Bureau is where you prototype operations visually. Model staffing, budget shape, timelines,
+    and change-scenarios by simply connecting the dots across the financial year.
+  </p>
+
+  <p className="text-sm leading-relaxed opacity-70">
+    No tasks. No comments. No replies. Just a sharp, executive view of what’s on, what’s next, and the
+    commercial reality behind it.
+  </p>
+</div>
+</div>
 
         <div className="mt-10 rounded-2xl border border-black/10 p-4">
           {sent ? (
