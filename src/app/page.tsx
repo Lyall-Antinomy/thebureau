@@ -21,9 +21,9 @@ export default function Home() {
 
     try {
       const payload = {
-        email: email.trim().toLowerCase(),
-        studio: studio.trim() || undefined,
-      };
+  email: email.trim().toLowerCase(),
+  name: studio.trim() || undefined,
+};
 
       const res = await fetch('/api/contact', {
         method: 'POST',
@@ -55,13 +55,14 @@ export default function Home() {
         <div className="flex items-center justify-between">
           <div className="text-lg font-semibold tracking-tight">The Bureau •</div>
 
-          <a
-            href="/"
-            className="text-sm opacity-60 hover:opacity-100 transition"
-            style={{ color: BUREAU_GREEN }}
-          >
-            Open app →
-          </a>
+          <span
+  className="text-sm opacity-60 hover:opacity-100 transition cursor-default select-none"
+  style={{ color: BUREAU_GREEN }}
+  aria-label="Open app (coming soon)"
+  title="Coming soon"
+>
+  Open app →
+</span>
         </div>
 
         <h1 className="mt-14 text-4xl font-medium leading-tight tracking-tight">
@@ -79,58 +80,44 @@ export default function Home() {
               <div className="mt-1 opacity-70">We’ll be in touch.</div>
             </div>
           ) : (
-            <form
-  className="flex flex-col gap-3"
-  onSubmit={async (e) => {
-    e.preventDefault();
+            <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
+  <input
+    className="w-full rounded-xl border border-black/10 px-4 py-3 text-sm outline-none focus:border-black/30 focus:ring-2 focus:ring-[#007231]/20"
+    placeholder="Email"
+    value={email}
+    onChange={(e) => setEmail(e.target.value)}
+    required
+    disabled={sending}
+    inputMode="email"
+    autoComplete="email"
+  />
 
-    try {
-      const res = await fetch('/api/contact', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name: studio }),
-      });
+  <input
+    className="w-full rounded-xl border border-black/10 px-4 py-3 text-sm outline-none focus:border-black/30 focus:ring-2 focus:ring-[#007231]/20"
+    placeholder="Studio name (optional)"
+    value={studio}
+    onChange={(e) => setStudio(e.target.value)}
+    disabled={sending}
+    autoComplete="organization"
+  />
 
-      const json = await res.json().catch(() => ({}));
+  <button
+    type="submit"
+    className="rounded-xl px-4 py-3 text-sm font-medium text-white transition hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed"
+    style={{ background: BUREAU_GREEN }}
+    disabled={sending}
+  >
+    {sending ? 'Sending…' : 'Request access'}
+  </button>
 
-      if (!res.ok) {
-        // show server message if available
-        alert(json?.error ?? 'Failed to send. Try again.');
-        return;
-      }
-
-      setSent(true);
-    } catch {
-      alert('Network error. Try again.');
-    }
-  }}
->
-
-              <input
-                className="w-full rounded-xl border border-black/10 px-4 py-3 text-sm outline-none focus:border-black/30 focus:ring-2 focus:ring-[#007231]/20"
-                placeholder="Studio name (optional)"
-                value={studio}
-                onChange={(e) => setStudio(e.target.value)}
-                disabled={sending}
-              />
-
-              <button
-                type="submit"
-                className="rounded-xl px-4 py-3 text-sm font-medium text-white transition hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed"
-                style={{ background: BUREAU_GREEN }}
-                disabled={sending}
-              >
-                {sending ? 'Sending…' : 'Request access'}
-              </button>
-
-              {error ? (
-                <div className="text-xs" style={{ color: '#b00020' }}>
-                  {error}
-                </div>
-              ) : (
-                <div className="text-xs opacity-50">No spam. No noise.</div>
-              )}
-            </form>
+  {error ? (
+    <div className="text-xs" style={{ color: '#b00020' }}>
+      {error}
+    </div>
+  ) : (
+    <div className="text-xs opacity-50">No spam. No noise.</div>
+  )}
+</form>
           )}
         </div>
 
