@@ -66,12 +66,12 @@ export default function Home() {
         </div>
 
         <h1 className="mt-14 text-4xl font-medium leading-tight tracking-tight">
-          Navigate Business Reality •
+          Prototype Business Reality.
         </h1>
 
       <div className="mt-6 space-y-3">
   <p className="text-lg leading-relaxed opacity-80">
-    People. Projects. Budgets. Time. - Connected.
+    People. Projects. Budgets. Time — Connected.
   </p>
  <div className="mt-6 space-y-3">
   <p className="text-base leading-relaxed opacity-80">

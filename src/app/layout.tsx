@@ -9,9 +9,9 @@ const ibmMono = IBM_Plex_Mono({
 });
 
 export const metadata = {
-  title: 'The Bureau • Navigate Business Reality.',
+  title: 'The Bureau • Prototype Business Reality.',
   description:
-    'An executive visual operating layer for modern studios. People, projects, money, time • all connected in one place.',
+    'An executive visual operating layer for modern studios. People, projects, money, time • Connected.',
 };
 
 export default function RootLayout({
