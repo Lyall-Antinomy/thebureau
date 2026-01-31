@@ -71,11 +71,11 @@ export default function Home() {
 
       <div className="mt-6 space-y-3">
   <p className="text-lg leading-relaxed opacity-80">
-    People. Projects. Budgets. Time. - All Connected.
+    People. Projects. Budgets. Time. - Connected.
   </p>
  <div className="mt-6 space-y-3">
   <p className="text-base leading-relaxed opacity-80">
-    The Bureau is where you prototype operations visually. Model staffing, budget shape, timelines,
+    The Bureau is where you prototype operations visually. Iterate on staffing, budget shape, timelines,
     and change-scenarios by simply connecting the dots across the financial year.
   </p>
 
