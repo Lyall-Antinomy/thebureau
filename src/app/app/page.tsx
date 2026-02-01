@@ -7,6 +7,7 @@ import ReactFlow, {
   Controls,
   MiniMap,
   Node,
+  NodeProps,
   Edge,
   Connection,
   MarkerType,
@@ -196,6 +197,16 @@ const DOCK_GAP_Y = 10;        // space between stacked nodes when "clipped"
 const DOCK_SNAP_Y = 18;       // how close (px) to snap vertically
 const DOCK_SNAP_X = 14;       // how close (px) to snap horizontally (left-align)
 const APP_STORAGE_KEY = 'studio-ops-graph:v1';
+
+function selectedNodeStyle(isDark: boolean): React.CSSProperties {
+  return {
+    border: `1px solid ${BUREAU_GREEN}`,
+    boxShadow: isDark
+      ? `0 0 0 1px ${BUREAU_GREEN}, 0 12px 28px rgba(0,0,0,0.45)`
+      : `0 0 0 2px rgba(0,114,49,0.35), 0 10px 24px rgba(0,0,0,0.10)`,
+    zIndex: 50,
+  };
+}
 
 const DEPT_COLOURS: Record<Dept, string> = {
   unassigned: '#94a3b8', // grey
@@ -1598,48 +1609,48 @@ const PORT_Y_OFFSET = 10;
   );
 }
 
-
-  function DockClip({ side }: { side: 'top' | 'bottom' }) {
+function DockClip({ side }: { side: 'top' | 'bottom' }) {
   const isTop = side === 'top';
 
   return (
-    <div
-      style={{
-        position: 'absolute',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        ...(isTop ? { top: -14 } : { bottom: -14 }),
-
-        width: 14,
-        height: 28,
-        borderRadius: 10,
-
-        border: '1px solid rgba(0,0,0,0.14)',
-        background: 'rgba(255,255,255,0.92)',
-        boxShadow: '0 6px 14px rgba(0,0,0,0.12)',
-
-        pointerEvents: 'none',
-        zIndex: 50,
-
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      {/* inner slit */}
+    <>
+      {/* vertical staple clip */}
       <div
         style={{
-          width: 3,
-          height: 14,
-          borderRadius: 999,
-          background: 'rgba(0,0,0,0.18)',
+          position: 'absolute',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          [isTop ? 'top' : 'bottom']: -8,
+          width: 12,
+          height: 18,
+          borderRadius: 6,
+          border: `2px solid ${BUREAU_GREEN}`,
+          background: 'white',
+          boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
+          zIndex: 5,
+          pointerEvents: 'none',
         }}
       />
-    </div>
+
+      {/* thin accent strip along dock edge */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          [isTop ? 'top' : 'bottom']: 0,
+          height: 3,
+          background: BUREAU_GREEN,
+          borderRadius: isTop ? '6px 6px 0 0' : '0 0 6px 6px',
+          opacity: 0.9,
+          pointerEvents: 'none',
+        }}
+      />
+    </>
   );
 }
 
-function BudgetNode({ id, data }: { id: string; data: GraphNodeData }) {
+function BudgetNode({ id, data, selected }: NodeProps<GraphNodeData>) {
   if (data.kind !== 'budget') return null;
 
   const nodes = useGraph((s) => s.nodes);
@@ -1676,6 +1687,8 @@ function BudgetNode({ id, data }: { id: string; data: GraphNodeData }) {
         border: is27b ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(0,0,0,0.10)',
         boxShadow: is27b ? '0 10px 24px rgba(0,0,0,0.40)' : '0 8px 20px rgba(0,0,0,0.06)',
         color: is27b ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.92)',
+
+        ...(selected ? selectedNodeStyle(is27b) : {}),
       })}
     >
       {/* visual-only clip indicators (top/bottom only to keep left handle clear) */}
@@ -1790,7 +1803,7 @@ function BudgetNode({ id, data }: { id: string; data: GraphNodeData }) {
   );
 }
 
-function TimelineNode({ data }: { data: GraphNodeData }) {
+function TimelineNode({ data, selected }: NodeProps<GraphNodeData>) {
   if (data.kind !== 'timeline') return null;
 
   const studio = (data as TimelineData).studio ?? 'Antinomy Studio';
@@ -1809,6 +1822,8 @@ function TimelineNode({ data }: { data: GraphNodeData }) {
         border: is27b ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(0,0,0,0.10)',
         boxShadow: is27b ? '0 10px 24px rgba(0,0,0,0.40)' : '0 8px 20px rgba(0,0,0,0.06)',
         color: is27b ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.92)',
+
+        ...(selected ? selectedNodeStyle(is27b) : {}),
       })}
     >
       {/* visual-only clip indicators (top/bottom only to keep left handle clear) */}

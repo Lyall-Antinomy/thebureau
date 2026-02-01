@@ -9,6 +9,13 @@
 
   /* IBM Mono injects our custom variable name */
   --font-mono: var(--font-mono);
+
+  /* --- The Bureau tokens --- */
+  --bureau-green: #007231;
+  --bureau-green-10: rgba(0, 114, 49, 0.10);
+
+  /* Match your card() radius */
+  --node-radius: 14px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -22,8 +29,6 @@ html,
 body {
   background: var(--background);
   color: var(--foreground);
-  
-
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -37,10 +42,45 @@ body {
   font-family: inherit;
 }
 
-/* Selected node state */
+/* Ensure the wrapper respects the rounded corners (does NOT change positioning) */
+.react-flow__node {
+  border-radius: var(--node-radius);
+}
+
+/* Remove any browser focus outline that can show as blue */
+.react-flow__node:focus,
+.react-flow__node:focus-visible {
+  outline: none !important;
+}
+
+/* --- The Bureau: selection styling --- */
+/* IMPORTANT: do NOT set position here (ReactFlow needs absolute positioning) */
 .react-flow__node.selected {
-  outline: 2px solid rgba(59, 130, 246, 0.85);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.18);
-  border-radius: 14px;
+  outline: none !important;
+  outline-offset: 0 !important;
+
+  /* subtle green ring instead of the blue */
+  box-shadow: 0 0 0 3px var(--bureau-green-10) !important;
+
+  /* make sure the band clips to corners */
+  overflow: hidden;
+
+  border-radius: var(--node-radius) !important;
+}
+
+/* Green bottom band that respects the node radius */
+.react-flow__node.selected::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  height: 3px;
+  background: var(--bureau-green);
+
+  border-bottom-left-radius: var(--node-radius);
+  border-bottom-right-radius: var(--node-radius);
+
+  pointer-events: none;
 }
