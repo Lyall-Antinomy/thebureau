@@ -84,3 +84,13 @@ body {
 
   pointer-events: none;
 }
+
+/* Canvas (empty space) should look like a normal pointer */
+.react-flow__pane {
+  cursor: default !important;
+}
+
+/* Optional: when actually panning/dragging the canvas, show grabbing */
+.react-flow__pane.dragging {
+  cursor: grabbing !important;
+}

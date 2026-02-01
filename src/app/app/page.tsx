@@ -3106,8 +3106,13 @@ const masterTimelineItems = useMemo(() => {
   onEdgeUpdate={handleEdgeUpdate}
   onEdgeUpdateEnd={handleEdgeUpdateEnd}
   edgeUpdaterRadius={18}
-isValidConnection={() => true}  
-fitView
+  panOnDrag={false}
+  panOnScroll
+  // panOnScrollMode="free"  // ❌ not supported by your current React Flow typings
+  zoomOnScroll={false}
+  zoomOnPinch={true}
+  isValidConnection={() => true}
+  fitView
   minZoom={0.05}
   maxZoom={2.5}
   defaultEdgeOptions={{
