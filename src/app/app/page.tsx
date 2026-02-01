@@ -191,15 +191,131 @@ type GraphState = {
  * Constants / Helpers
  * -------------------------
  */
-
+// --- Dock / Clip tuning ---
+const DOCK_GAP_Y = 10;        // space between stacked nodes when "clipped"
+const DOCK_SNAP_Y = 18;       // how close (px) to snap vertically
+const DOCK_SNAP_X = 14;       // how close (px) to snap horizontally (left-align)
 const APP_STORAGE_KEY = 'studio-ops-graph:v1';
 
 const DEPT_COLOURS: Record<Dept, string> = {
   unassigned: '#94a3b8', // grey
-  ops: '#86EFAC', // green
-  design: '#F9A8D4', // pink
-  dev: '#FDE047', // yellow (Engineering)
+  ops: '#86EFAC',        // green
+  design: '#F9A8D4',     // pink
+  dev: '#FDE047',        // yellow (Engineering)
 };
+
+// --- Dock / Magnetic snap (Budget ↔ Timeline) ---
+const DOCK_Y_GAP = 12;        // space between stacked nodes
+const DOCK_SNAP_DIST = 28;    // how close before it snaps (Y)
+const DOCK_X_SNAP_DIST = 220;  // how close before X aligns
+
+// --- Dock helpers ---
+function isDockableKind(kind: NodeKind) {
+  return kind === 'budget' || kind === 'timeline';
+}
+// --- Dock (visual) detection ---
+// Purely visual: infer "docked" when a budget/timeline are stacked within tolerance.
+
+const DOCK_VISUAL_Y_TOL = 10;          // how tight the "touch" must be
+const DOCK_VISUAL_MIN_X_OVERLAP = 0.35; // prevent accidental docking across the canvas
+
+type DockVisual = { top?: boolean; bottom?: boolean; withId?: string };
+
+function nodeRect(n: any) {
+  const w = n.width ?? 260;
+  const h = n.height ?? 140;
+  const x = n.position?.x ?? 0;
+  const y = n.position?.y ?? 0;
+
+  return { x, y, w, h, x2: x + w, y2: y + h, cx: x + w / 2 };
+}
+
+function xOverlapRatio(a: any, b: any) {
+  const A = nodeRect(a);
+  const B = nodeRect(b);
+
+  const overlap = Math.max(0, Math.min(A.x2, B.x2) - Math.max(A.x, B.x));
+  const minW = Math.min(A.w, B.w);
+  return minW > 0 ? overlap / minW : 0;
+}
+
+function computeDockVisual(nodes: any[], dockGap: number) {
+  const dock: Record<string, DockVisual> = {};
+
+  const ensure = (id: string) =>
+    (dock[id] ??= { top: false, bottom: false, withId: undefined });
+
+  const dockables = nodes.filter((n) => isDockableKind((n as any)?.data?.kind));
+
+  for (const upper of dockables) {
+    const upperPos = upper.position;
+    const upperH = (upper as any).height ?? 140;
+
+    // we want the closest node that is stacked directly BELOW this upper node
+    const expectedLowerY = upperPos.y + upperH + dockGap;
+
+    let bestLower: any | null = null;
+    let bestDist = Infinity;
+
+    for (const lower of dockables) {
+      if (lower.id === upper.id) continue;
+
+      const lowerPos = lower.position;
+
+      // ✅ prevent ghost snapping: require X alignment first (same column)
+      if (Math.abs(lowerPos.x - upperPos.x) > DOCK_X_SNAP_DIST) continue;
+
+      // candidate must be near the "stacked below" Y band
+      const yDist = Math.abs(lowerPos.y - expectedLowerY);
+      if (yDist > DOCK_SNAP_DIST) continue;
+
+      if (yDist < bestDist) {
+        bestDist = yDist;
+        bestLower = lower;
+      }
+    }
+
+    // Rule: ONE clip per junction -> clip lives on the UPPER node's bottom only.
+    if (bestLower) {
+      ensure(upper.id).bottom = true;
+      ensure(upper.id).withId = bestLower.id;
+    }
+  }
+
+  return dock;
+}
+function snapDockPosition(
+  moving: { x: number; y: number; width?: number; height?: number },
+  target: { x: number; y: number; width?: number; height?: number },
+  opts: { dockGap: number; snapY: number; snapX: number }
+): { x: number; y: number; dockSide: 'top' | 'bottom'; dist: number } | null {
+  const { dockGap, snapY } = opts;
+  const snapX = opts.snapX ?? 0;
+
+  // Fallback sizes if ReactFlow hasn't measured yet.
+  const mH = moving.height ?? 140;
+  const tH = target.height ?? 140;
+
+  // Candidate Y positions (stack above / below)
+  const yAbove = target.y - dockGap - mH;
+  const yBelow = target.y + tH + dockGap;
+
+  const distAbove = Math.abs(moving.y - yAbove);
+  const distBelow = Math.abs(moving.y - yBelow);
+
+  // If neither candidate is close enough, no snap.
+  const dist = Math.min(distAbove, distBelow);
+  if (dist > snapY) return null;
+
+  const dockSide: 'top' | 'bottom' = distAbove <= distBelow ? 'top' : 'bottom';
+  const y = dockSide === 'top' ? yAbove : yBelow;
+
+  // Optional X snap (align left edges) — keep OFF by default by passing snapX=0
+  let x = moving.x;
+  if (snapX > 0 && Math.abs(moving.x - target.x) <= snapX) x = target.x;
+
+  return { x, y, dockSide, dist };
+}
 
 function deptLabel(d: Dept) {
   if (d === 'dev') return 'Engineering';
@@ -276,10 +392,14 @@ function reactFlowTypeForNode(kind: NodeKind): string {
 
 function tinyPort(): React.CSSProperties {
   return {
-    width: 10,
-    height: 10,
-    background: 'rgba(0,0,0,0.35)',
-    border: '2px solid white',
+    width: 14,
+    height: 14,
+    borderRadius: 999,
+    background: 'rgba(0,0,0,0.55)',
+    border: '2px solid rgba(255,255,255,0.85)',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+    cursor: 'crosshair',
+    pointerEvents: 'all',
   };
 }
 
@@ -668,7 +788,93 @@ function getDefaultGraph(): PersistedGraph {
     edges: [],
   };
 }
+type DockSide = 'top' | 'bottom';
 
+type DockState = {
+  top?: { otherId: string };
+  bottom?: { otherId: string };
+};
+
+function isDockableNode(n: Node<GraphNodeData>) {
+  const k = n.data?.kind as any;
+  return k === 'budget' || k === 'timeline';
+}
+
+function getNodeSize(n: any) {
+  const w = n?.measured?.width ?? n?.width ?? 260;
+  const h = n?.measured?.height ?? n?.height ?? 140;
+  return { w, h };
+}
+
+function computeDockState(
+  nodes: Node<GraphNodeData>[],
+  opts: { dockGap: number; snapDist: number; xSnapDist: number }
+) {
+  const { dockGap, snapDist, xSnapDist } = opts;
+
+  const dock: Record<string, DockState> = {};
+  const best: Record<string, { top?: number; bottom?: number }> = {};
+
+  const dockables = nodes.filter(isDockableNode);
+
+  for (const a of dockables) {
+    for (const b of dockables) {
+      if (a.id === b.id) continue;
+
+      const aPos = a.position;
+      const bPos = b.position;
+
+      const { h: bH } = getNodeSize(b);
+
+      // a docked BELOW b  => a.top + b.bottom relationship
+      const expectedYBelow = bPos.y + bH + dockGap;
+      const dyBelow = Math.abs(aPos.y - expectedYBelow);
+      const dx = Math.abs(aPos.x - bPos.x);
+
+      if (dx <= xSnapDist && dyBelow <= snapDist) {
+        // a.top docked to b.bottom
+        best[a.id] ??= {};
+        best[b.id] ??= {};
+
+        if (best[a.id].top === undefined || dyBelow < best[a.id].top!) {
+          best[a.id].top = dyBelow;
+          dock[a.id] ??= {};
+          dock[a.id].top = { otherId: b.id };
+        }
+
+        if (best[b.id].bottom === undefined || dyBelow < best[b.id].bottom!) {
+          best[b.id].bottom = dyBelow;
+          dock[b.id] ??= {};
+          dock[b.id].bottom = { otherId: a.id };
+        }
+      }
+
+      // a docked ABOVE b => a.bottom + b.top relationship
+      const { h: aH } = getNodeSize(a);
+      const expectedYAbove = bPos.y - dockGap - aH;
+      const dyAbove = Math.abs(aPos.y - expectedYAbove);
+
+      if (dx <= xSnapDist && dyAbove <= snapDist) {
+        best[a.id] ??= {};
+        best[b.id] ??= {};
+
+        if (best[a.id].bottom === undefined || dyAbove < best[a.id].bottom!) {
+          best[a.id].bottom = dyAbove;
+          dock[a.id] ??= {};
+          dock[a.id].bottom = { otherId: b.id };
+        }
+
+        if (best[b.id].top === undefined || dyAbove < best[b.id].top!) {
+          best[b.id].top = dyAbove;
+          dock[b.id] ??= {};
+          dock[b.id].top = { otherId: a.id };
+        }
+      }
+    }
+  }
+
+  return dock;
+}
 /**
  * -------------------------
  * Zustand Store
@@ -922,11 +1128,82 @@ addLedger: () =>
 
     onNodesChange: (changes) =>
   set((s) => {
-    // Apply the changes normally first
-    const nextNodes = applyNodeChanges(changes, s.nodes);
+    // --- 0) Magnetic snap for Budget/Timeline drags (never snaps projects) ---
+    const snappedChanges = changes.map((ch) => {
+  if (ch.type !== 'position') return ch;
 
-    // Only do group-drag if a PROJECT node is being actively dragged
-    const projectDrag = changes.find((ch) => {
+  const anyCh = ch as any;
+  if (!anyCh.dragging) return ch;
+
+  const movedId = anyCh.id as string;
+  const movingNode = s.nodes.find((n) => n.id === movedId);
+  if (!movingNode) return ch;
+
+  const movingKind = movingNode.data?.kind as NodeKind | undefined;
+
+  // Projects have special group-drag logic; never snap them.
+  if (movingKind === 'project') return ch;
+
+  // Only snap budget/timeline
+  if (!movingKind || !isDockableKind(movingKind)) return ch;
+
+  const movingPos = (anyCh.position ?? movingNode.position) as { x: number; y: number };
+
+  // Fallback sizes (only used if RF hasn't measured width/height yet)
+  const movingW =
+    (movingNode as any).width ?? (movingKind === 'budget' ? 320 : 260);
+  const movingH =
+    (movingNode as any).height ?? (movingKind === 'budget' ? 240 : 140);
+
+  let best: { x: number; y: number } | null = null;
+  let bestScore = Infinity;
+
+  const movingCenterX = movingPos.x + movingW / 2;
+
+  for (const target of s.nodes) {
+    if (target.id === movedId) continue;
+
+    const targetKind = target.data?.kind as NodeKind | undefined;
+    if (!targetKind || !isDockableKind(targetKind)) continue;
+
+    const targetW =
+      (target as any).width ?? (targetKind === 'budget' ? 320 : 260);
+    const targetH =
+      (target as any).height ?? (targetKind === 'budget' ? 240 : 140);
+
+    const targetCenterX = target.position.x + targetW / 2;
+
+       // ✅ Prevent ghost snapping: only consider targets that are reasonably aligned in X
+    if (Math.abs(movingCenterX - targetCenterX) > DOCK_X_SNAP_DIST) continue;
+
+    const snapped = snapDockPosition(
+      { x: movingPos.x, y: movingPos.y, width: movingW, height: movingH },
+      { x: target.position.x, y: target.position.y, width: targetW, height: targetH },
+      {
+        dockGap: DOCK_Y_GAP,
+        snapY: DOCK_SNAP_DIST,
+        snapX: 0, // 👈 we are NOT snapping X in this pass
+      }
+    );
+
+    if (!snapped) continue;
+
+    // Only care about Y movement (we're not snapping X)
+    const score = Math.abs(snapped.y - movingPos.y);
+    if (score < bestScore) {
+      bestScore = score;
+      best = snapped;
+    }
+  }
+
+  return best ? ({ ...anyCh, position: best } as any) : ch;
+});
+
+    // --- 1) Apply the changes normally first (use snappedChanges) ---
+    const nextNodes = applyNodeChanges(snappedChanges, s.nodes);
+
+    // --- 2) Group-drag only if a PROJECT is actively being dragged ---
+    const projectDrag = snappedChanges.find((ch) => {
       if (ch.type !== 'position') return false;
       const anyCh = ch as any;
       if (!anyCh.dragging) return false;
@@ -942,7 +1219,6 @@ addLedger: () =>
 
     const projectId = projectDrag.id as string;
 
-    // Old vs new position for the project
     const prevProject = s.nodes.find((n) => n.id === projectId);
     const nextProject = nextNodes.find((n) => n.id === projectId);
 
@@ -953,34 +1229,30 @@ addLedger: () =>
     const dx = nextProject.position.x - prevProject.position.x;
     const dy = nextProject.position.y - prevProject.position.y;
 
-    // If no movement, bail
     if (dx === 0 && dy === 0) {
       return { nodes: nextNodes };
     }
 
-    // One-hop connected nodes = the “organism”
+    // one-hop connected nodes = organism
     const connectedIds = new Set<string>();
     for (const e of s.edges) {
       if (e.source === projectId) connectedIds.add(e.target);
       if (e.target === projectId) connectedIds.add(e.source);
     }
 
-    // Move connected nodes by same delta (but not the project itself)
     const draggedNodes = nextNodes.map((n) => {
-      if (!connectedIds.has(n.id)) return n;
       if (n.id === projectId) return n;
+      if (!connectedIds.has(n.id)) return n;
 
       return {
         ...n,
-        position: {
-          x: n.position.x + dx,
-          y: n.position.y + dy,
-        },
+        position: { x: n.position.x + dx, y: n.position.y + dy },
       };
     });
 
     return { nodes: draggedNodes };
   }),
+
     onEdgesChange: (changes) => set((s) => ({ edges: applyEdgeChanges(changes, s.edges) })),
 
     selectNode: (id) => set(() => ({ selectedNodeId: id, selectedEdgeId: null })),
@@ -1326,6 +1598,47 @@ const PORT_Y_OFFSET = 10;
   );
 }
 
+
+  function DockClip({ side }: { side: 'top' | 'bottom' }) {
+  const isTop = side === 'top';
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        ...(isTop ? { top: -14 } : { bottom: -14 }),
+
+        width: 14,
+        height: 28,
+        borderRadius: 10,
+
+        border: '1px solid rgba(0,0,0,0.14)',
+        background: 'rgba(255,255,255,0.92)',
+        boxShadow: '0 6px 14px rgba(0,0,0,0.12)',
+
+        pointerEvents: 'none',
+        zIndex: 50,
+
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {/* inner slit */}
+      <div
+        style={{
+          width: 3,
+          height: 14,
+          borderRadius: 999,
+          background: 'rgba(0,0,0,0.18)',
+        }}
+      />
+    </div>
+  );
+}
+
 function BudgetNode({ id, data }: { id: string; data: GraphNodeData }) {
   if (data.kind !== 'budget') return null;
 
@@ -1347,30 +1660,51 @@ function BudgetNode({ id, data }: { id: string; data: GraphNodeData }) {
   const debitLines = computed?.debits.lines ?? [];
   const debitTotal = computed?.debits.total ?? 0;
 
-  // Check if connected to 27b project
   const studio = (data as BudgetData).studio ?? 'Antinomy Studio';
   const is27b = studio === '27b';
 
+  // injected by displayNodes (visual-only)
+  const dock = (data as any).dock as { top?: boolean; bottom?: boolean } | undefined;
+
   return (
-    <div style={card({ 
-      minWidth: 320, 
-      background: is27b ? '#0b0b0c' : getNodeBg('budget'),
-      border: is27b ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(0,0,0,0.10)',
-      boxShadow: is27b ? '0 10px 24px rgba(0,0,0,0.40)' : '0 8px 20px rgba(0,0,0,0.06)',
-      color: is27b ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.92)',
-    })}>
+    <div
+      style={card({
+        minWidth: 320,
+        position: 'relative',
+        overflow: 'visible',
+        background: is27b ? '#0b0b0c' : getNodeBg('budget'),
+        border: is27b ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(0,0,0,0.10)',
+        boxShadow: is27b ? '0 10px 24px rgba(0,0,0,0.40)' : '0 8px 20px rgba(0,0,0,0.06)',
+        color: is27b ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.92)',
+      })}
+    >
+      {/* visual-only clip indicators (top/bottom only to keep left handle clear) */}
+      {dock?.top && <DockClip side="top" />}
+      {dock?.bottom && <DockClip side="bottom" />}
+
       <Handle type="target" position={Position.Left} id="budget-in" style={tinyPort()} />
       <Handle type="source" position={Position.Right} id="budget-out" style={tinyPort()} />
 
       <div style={{ fontWeight: 650, fontSize: 13 }}>{data.title}</div>
+
       <div style={{ fontSize: 11, opacity: 0.65 }}>
-        budget • <span style={{ fontWeight: 750, color: is27b ? '#ff0800' : undefined }}>{studio}</span>
+        budget •{' '}
+        <span style={{ fontWeight: 750, color: is27b ? '#ff0800' : undefined }}>{studio}</span>
       </div>
 
       <div style={{ marginTop: 10, fontWeight: 750, fontSize: 18 }}>{formatEUR(netTotal)}</div>
       <div style={{ fontSize: 11, opacity: 0.6 }}>Net budget (after external fees)</div>
 
-      <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr auto', gap: 6, fontSize: 11, opacity: 0.85 }}>
+      <div
+        style={{
+          marginTop: 10,
+          display: 'grid',
+          gridTemplateColumns: '1fr auto',
+          gap: 6,
+          fontSize: 11,
+          opacity: 0.85,
+        }}
+      >
         <div>Design</div>
         <div style={{ fontWeight: 700 }}>
           {formatEUR(netDesign)} <span style={{ opacity: 0.55 }}> / {formatEUR(grossDesign)}</span>
@@ -1386,23 +1720,37 @@ function BudgetNode({ id, data }: { id: string; data: GraphNodeData }) {
       </div>
 
       {debitLines.length > 0 && (
-        <div style={{ 
-          marginTop: 10, 
-          padding: 10, 
-          borderRadius: 12, 
-          border: is27b ? '1px solid rgba(255,8,0,0.30)' : '1px solid rgba(220,38,38,0.20)',
-          background: is27b ? 'rgba(255,8,0,0.08)' : 'rgba(220,38,38,0.04)'
-        }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: is27b ? '#ff0800' : 'rgba(220,38,38,0.92)' }}>Debits</div>
+        <div
+          style={{
+            marginTop: 10,
+            padding: 10,
+            borderRadius: 12,
+            border: is27b ? '1px solid rgba(255,8,0,0.30)' : '1px solid rgba(220,38,38,0.20)',
+            background: is27b ? 'rgba(255,8,0,0.08)' : 'rgba(220,38,38,0.04)',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: is27b ? '#ff0800' : 'rgba(220,38,38,0.92)',
+            }}
+          >
+            Debits
+          </div>
+
           <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {debitLines.map((l, idx) => (
-              <div key={idx} style={{ 
-                display: 'flex', 
-                gap: 10, 
-                alignItems: 'center', 
-                fontSize: 11, 
-                color: is27b ? '#ff0800' : 'rgba(220,38,38,0.92)' 
-              }}>
+              <div
+                key={idx}
+                style={{
+                  display: 'flex',
+                  gap: 10,
+                  alignItems: 'center',
+                  fontSize: 11,
+                  color: is27b ? '#ff0800' : 'rgba(220,38,38,0.92)',
+                }}
+              >
                 <span style={{ width: 8, height: 8, borderRadius: 999, background: l.color }} />
                 <span style={{ fontWeight: 650 }}>{l.personName}</span>
                 <span style={{ opacity: 0.75 }}>({l.phase})</span>
@@ -1410,64 +1758,106 @@ function BudgetNode({ id, data }: { id: string; data: GraphNodeData }) {
               </div>
             ))}
           </div>
-          <div style={{ 
-            marginTop: 8, 
-            display: 'flex', 
-            fontSize: 11, 
-            color: is27b ? '#ff0800' : 'rgba(220,38,38,0.92)', 
-            fontWeight: 750 
-          }}>
+
+          <div
+            style={{
+              marginTop: 8,
+              display: 'flex',
+              fontSize: 11,
+              color: is27b ? '#ff0800' : 'rgba(220,38,38,0.92)',
+              fontWeight: 750,
+            }}
+          >
             <span>Total debits</span>
             <span style={{ marginLeft: 'auto' }}>− {formatEUR(debitTotal)}</span>
           </div>
         </div>
       )}
 
-      <div style={{ 
-        marginTop: 10, 
-        padding: 10, 
-        borderRadius: 12, 
-        border: is27b ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
-        background: is27b ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'
-      }}>
+      <div
+        style={{
+          marginTop: 10,
+          padding: 10,
+          borderRadius: 12,
+          border: is27b ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
+          background: is27b ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+        }}
+      >
         <div style={{ fontSize: 11, opacity: 0.6 }}>Gross total</div>
         <div style={{ fontWeight: 700, fontSize: 13 }}>{formatEUR(grossTotal)}</div>
       </div>
     </div>
   );
 }
+
 function TimelineNode({ data }: { data: GraphNodeData }) {
   if (data.kind !== 'timeline') return null;
 
   const studio = (data as TimelineData).studio ?? 'Antinomy Studio';
   const is27b = studio === '27b';
 
+  // injected by displayNodes (visual-only)
+  const dock = (data as any).dock as { top?: boolean; bottom?: boolean } | undefined;
+
   return (
-    <div style={card({ 
-      minWidth: 260, 
-      background: is27b ? '#0b0b0c' : getNodeBg('timeline'),
-      border: is27b ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(0,0,0,0.10)',
-      boxShadow: is27b ? '0 10px 24px rgba(0,0,0,0.40)' : '0 8px 20px rgba(0,0,0,0.06)',
-      color: is27b ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.92)',
-    })}>
+    <div
+      style={card({
+        minWidth: 320, // match BudgetNode
+        position: 'relative',
+        overflow: 'visible',
+        background: is27b ? '#0b0b0c' : getNodeBg('timeline'),
+        border: is27b ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(0,0,0,0.10)',
+        boxShadow: is27b ? '0 10px 24px rgba(0,0,0,0.40)' : '0 8px 20px rgba(0,0,0,0.06)',
+        color: is27b ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.92)',
+      })}
+    >
+      {/* visual-only clip indicators (top/bottom only to keep left handle clear) */}
+      {dock?.top && <DockClip side="top" />}
+      {dock?.bottom && <DockClip side="bottom" />}
+
       <Handle type="target" position={Position.Left} id="timeline-in" style={tinyPort()} />
-      <Handle type="target" position={Position.Bottom} id="resource-in" style={{ ...tinyPort(), left: '70%' }} />
+      <Handle
+        type="target"
+        position={Position.Bottom}
+        id="resource-in"
+        style={{ ...tinyPort(), left: '70%' }}
+      />
 
       <div style={{ fontWeight: 650, fontSize: 13 }}>{data.title}</div>
       <div style={{ fontSize: 11, opacity: 0.65 }}>
-        timeline • <span style={{ fontWeight: 750, color: is27b ? '#ff0800' : undefined }}>{studio}</span>
+        timeline •{' '}
+        <span style={{ fontWeight: 750, color: is27b ? '#ff0800' : undefined }}>{studio}</span>
       </div>
 
-      <div style={{ 
-        marginTop: 10, 
-        padding: 10, 
-        borderRadius: 12, 
-        border: is27b ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
-        background: is27b ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'
-      }}>
+      <div
+        style={{
+          marginTop: 10,
+          padding: 10,
+          borderRadius: 12,
+          border: is27b ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
+          background: is27b ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)',
+        }}
+      >
         <div style={{ fontSize: 11, opacity: 0.6 }}>Date range</div>
-        <div style={{ fontSize: 12, fontWeight: 650 }}>
-          {(data.startDate || '—')} → {(data.endDate || '—')}
+
+        <div
+          style={{
+            marginTop: 2,
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: 8,
+            fontSize: 13,
+            fontWeight: 700,
+            lineHeight: 1.2,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+          title={`${data.startDate || '—'} → ${data.endDate || '—'}`}
+        >
+          <span style={{ opacity: 0.92 }}>{data.startDate || '—'}</span>
+          <span style={{ opacity: 0.5, fontWeight: 650 }}>→</span>
+          <span style={{ opacity: 0.92 }}>{data.endDate || '—'}</span>
         </div>
       </div>
     </div>
@@ -1550,6 +1940,8 @@ const nodeTypes = {
   turnoverNode: TurnoverNode,
   ledgerNode: LedgerNode, // ✅ add this
 };
+
+
 function LedgerNode({ id, data }: { id: string; data: GraphNodeData }) {
   if (data.kind !== 'ledger') return null;
 
@@ -2012,7 +2404,7 @@ const displayNodes = useMemo(() => {
 
     const t = tNode.data as any;
 
-    // 👇 your timeline node stores these (from your file)
+    // 👇 your timeline node stores these
     const startISO = t.startDate;
     const endISO = t.endDate;
 
@@ -2042,45 +2434,126 @@ const displayNodes = useMemo(() => {
     return ownerEdge?.source ?? null;
   }
 
+  // --- Dock / Clip visual state (purely visual, no graph logic changes) ---
+  const dockMap = new Map<string, { top: boolean; bottom: boolean }>();
+
+  function isDockable(kind: any) {
+    return kind === 'budget' || kind === 'timeline';
+  }
+
+  function getDockFlags(id: string) {
+    const cur = dockMap.get(id);
+    if (cur) return cur;
+    const next = { top: false, bottom: false };
+    dockMap.set(id, next);
+    return next;
+  }
+
+    // Detect “snapped” top/bottom relationships using your snap tolerances
+  // Rule: ONE clip per junction -> clip lives on the UPPER node's bottom only.
+  for (const a of wiredNodes) {
+    const aKind = (a as any)?.data?.kind;
+    if (!isDockable(aKind)) continue;
+
+    for (const b of wiredNodes) {
+      if (a.id === b.id) continue;
+      const bKind = (b as any)?.data?.kind;
+      if (!isDockable(bKind)) continue;
+
+      const aPos = a.position;
+      const bPos = b.position;
+
+      // Default sizes if ReactFlow hasn't measured yet
+      const aH = (a as any).height ?? 140;
+      const bH = (b as any).height ?? 140;
+
+      // We only care about top/bottom docking (no left/right)
+      const yAboveB = bPos.y - DOCK_Y_GAP - aH; // a above b
+      const yBelowB = bPos.y + bH + DOCK_Y_GAP; // a below b
+
+      const ySnap =
+        Math.abs(aPos.y - yAboveB) <= DOCK_SNAP_DIST ||
+        Math.abs(aPos.y - yBelowB) <= DOCK_SNAP_DIST;
+
+      // Only allow x alignment when y is also snapping (prevents ghost x snaps)
+      let xSnap = false;
+      if (ySnap) {
+        xSnap = Math.abs(aPos.x - bPos.x) <= DOCK_X_SNAP_DIST;
+      }
+
+      if (!ySnap || !xSnap) continue;
+
+      // a snapped ABOVE b -> clip on a.bottom only
+      if (Math.abs(aPos.y - yAboveB) <= DOCK_SNAP_DIST) {
+        getDockFlags(a.id).bottom = true;
+      }
+
+      // a snapped BELOW b -> clip on b.bottom only (since b is the upper node)
+      if (Math.abs(aPos.y - yBelowB) <= DOCK_SNAP_DIST) {
+        getDockFlags(b.id).bottom = true;
+      }
+    }
+  }
+
   return wiredNodes.map((n) => {
     const kind = n.data?.kind;
 
+    // Inject dock flags (visual-only). Non-dockables get null.
+    const dock =
+      kind === 'budget' || kind === 'timeline'
+        ? dockMap.get(n.id) ?? { top: false, bottom: false }
+        : null;
+
     // always solid
-    if (kind === 'person' || kind === 'capacity') return n;
-    if (String(kind).includes('turnover')) return n;
+    if (kind === 'person' || kind === 'capacity') {
+      return dock ? { ...n, data: { ...(n.data as any), dock } } : n;
+    }
+    if (String(kind).includes('turnover')) {
+      return dock ? { ...n, data: { ...(n.data as any), dock } } : n;
+    }
 
     if (kind === 'project') {
       const op = opacityForProject(n.id);
-      return { ...n, style: { ...(n.style || {}), opacity: op } };
+      const next = { ...n, style: { ...(n.style || {}), opacity: op } };
+      return dock ? { ...next, data: { ...(next.data as any), dock } } : next;
     }
 
     if (kind === 'budget' || kind === 'timeline') {
       const pid = ownerProjectId(n.id);
       const op = pid ? opacityForProject(pid) : FULL;
-      return { ...n, style: { ...(n.style || {}), opacity: op } };
+
+      return {
+        ...n,
+        data: { ...(n.data as any), dock },
+        style: { ...(n.style || {}), opacity: op },
+      };
     }
 
-    return n;
+    return dock ? { ...n, data: { ...(n.data as any), dock } } : n;
   });
 }, [wiredNodes, nodes, edges, scrubDate]);
-  const isValidConnection = useCallback((c: Connection) => isValidConnectionStrict(nodes, c), [nodes]);
 
-  /**
-   * Timeline items come from timeline nodes
-   */
-  const masterTimelineItems = useMemo(() => {
-    return wiredNodes
-      .filter((n) => n.data.kind === 'timeline')
-      .map((n) => {
-        const t = n.data as TimelineData;
-        return {
-          id: n.id,
-          title: t.title,
-          startDate: t.startDate,
-          endDate: t.endDate,
-        };
-      });
-  }, [wiredNodes]);
+const isValidConnection = useCallback(
+  (c: Connection) => isValidConnectionStrict(nodes, c),
+  [nodes]
+);
+
+/**
+ * Timeline items come from timeline nodes
+ */
+const masterTimelineItems = useMemo(() => {
+  return wiredNodes
+    .filter((n) => n.data.kind === 'timeline')
+    .map((n) => {
+      const t = n.data as TimelineData;
+      return {
+        id: n.id,
+        title: t.title,
+        startDate: t.startDate,
+        endDate: t.endDate,
+      };
+    });
+}, [wiredNodes]);
 
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
@@ -2618,15 +3091,17 @@ const displayNodes = useMemo(() => {
   onEdgeUpdate={handleEdgeUpdate}
   onEdgeUpdateEnd={handleEdgeUpdateEnd}
   edgeUpdaterRadius={18}
-  isValidConnection={isValidConnection}
-  fitView
+isValidConnection={() => true}  
+fitView
   minZoom={0.05}
   maxZoom={2.5}
   defaultEdgeOptions={{
     type: edgeMode === 'radius' ? 'smoothstep' : 'default',
     markerEnd: { type: MarkerType.ArrowClosed },
   }}
-  connectionLineType={edgeMode === 'radius' ? ConnectionLineType.SmoothStep : ConnectionLineType.Bezier}
+  connectionLineType={
+    edgeMode === 'radius' ? ConnectionLineType.SmoothStep : ConnectionLineType.Bezier
+  }
 >
   <MiniMap />
   <Controls />
