@@ -27,24 +27,38 @@
 
 html,
 body {
+  margin: 0;
+  padding: 0;
   background: var(--background);
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  overscroll-behavior-x: none;
+  overscroll-behavior-y: none;
+
+  overflow: hidden; /* ✅ do it for this app */
 }
 
-/* Make sure ReactFlow + nodes inherit the global font */
+/* ReactFlow should inherit app fonts */
 .react-flow,
-.react-flow__renderer,
-.react-flow__pane,
 .react-flow__node,
 .react-flow__node * {
   font-family: inherit;
 }
 
-/* Ensure the wrapper respects the rounded corners (does NOT change positioning) */
+/* IMPORTANT: do NOT disable touch-action on desktop trackpads.
+   Let ReactFlow handle pointer events normally. */
+.react-flow__renderer,
+.react-flow__pane {
+  overscroll-behavior: none;
+  touch-action: pan-x pan-y; /* allow normal panning gestures */
+}
+
+/* Node wrapper rounding (safe: does not change positioning) */
 .react-flow__node {
   border-radius: var(--node-radius);
+  overflow: visible; /* critical: never clip handles */
 }
 
 /* Remove any browser focus outline that can show as blue */
@@ -53,44 +67,57 @@ body {
   outline: none !important;
 }
 
-/* --- The Bureau: selection styling --- */
+/* --- The Bureau: selection styling (NO pseudo-elements, NO overflow hidden) --- */
 /* IMPORTANT: do NOT set position here (ReactFlow needs absolute positioning) */
 .react-flow__node.selected {
   outline: none !important;
   outline-offset: 0 !important;
 
-  /* subtle green ring instead of the blue */
-  box-shadow: 0 0 0 3px var(--bureau-green-10) !important;
-
-  /* make sure the band clips to corners */
-  overflow: hidden;
+  /* subtle green ring + bottom band using inset shadow (prevents handle clipping) */
+  box-shadow:
+    0 0 0 6px var(--bureau-green-10),
+    inset 0 -3px 0 0 var(--bureau-green) !important;
 
   border-radius: var(--node-radius) !important;
+  overflow: visible !important; /* ensure selection never clips handles */
 }
 
-/* Green bottom band that respects the node radius */
-.react-flow__node.selected::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-
-  height: 3px;
-  background: var(--bureau-green);
-
-  border-bottom-left-radius: var(--node-radius);
-  border-bottom-right-radius: var(--node-radius);
-
-  pointer-events: none;
+/* Handles must always sit above selection rings/bands */
+.react-flow__handle {
+  z-index: 50 !important;
 }
 
-/* Canvas (empty space) should look like a normal pointer */
-.react-flow__pane {
-  cursor: default !important;
+/* ---- Canvas cursor (Figma-style) ----
+   Apply to *all* possible canvas layers ReactFlow uses */
+.react-flow,
+.react-flow__renderer,
+.react-flow__viewport,
+.react-flow__pane,
+.react-flow__selectionpane {
+  cursor: grab !important;
 }
 
-/* Optional: when actually panning/dragging the canvas, show grabbing */
-.react-flow__pane.dragging {
+/* While panning */
+.react-flow__pane.dragging,
+.react-flow__renderer.dragging,
+.react-flow__viewport:active,
+.react-flow__pane:active {
   cursor: grabbing !important;
 }
+
+.react-flow__node { cursor: grab !important; }
+.react-flow__node:active { cursor: grabbing !important; }
+.react-flow__handle {
+  cursor: crosshair !important;
+}
+.react-flow__edge,
+.react-flow__edge * {
+  cursor: pointer !important;
+}
+
+#flow-shell {
+  overscroll-behavior: none;
+  /* Do NOT set touch-action: none here; it can break trackpad gesture routing */
+  touch-action: pan-x pan-y;
+}
+

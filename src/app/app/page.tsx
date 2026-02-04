@@ -6,7 +6,7 @@ import ReactFlow, {
   Background,
   Controls,
   MiniMap,
-  Node,
+  Node as RFNode,
   NodeProps,
   Edge,
   Connection,
@@ -32,9 +32,24 @@ import MasterTimeline from '../MasterTimeline';
 
 type TurnoverType = 'gross' | 'design' | 'dev' | 'ops';
 type Studio = '27b' | 'Antinomy Studio';
-type NodeKind = 'person' | 'capacity' | 'project' | 'budget' | 'timeline' | 'turnover' | 'ledger';
+
+type NodeKind =
+  | 'person'
+  | 'capacity'
+  | 'project'
+  | 'budget'
+  | 'timeline'
+  | 'turnover'
+  | 'ledger';
+
+type BaseNodeData = {
+  title: string;
+  kind: NodeKind;
+};
+
 type ViewMode = 'workflow' | 'timeline';
 type Dept = 'unassigned' | 'ops' | 'design' | 'dev';
+
 
 type PersonData = {
   title: string;
@@ -53,11 +68,12 @@ type CapacityData = {
   kind: 'capacity';
 };
 
-type ProjectData = {
-  title: string;
+type ProjectData = BaseNodeData & {
   kind: 'project';
-  studio: Studio;
+  studio?: Studio;
+  client?: string; // user input (shown in Project node + editable in inspector)
 };
+
 type BudgetPhase = 'design' | 'dev' | 'ops';
 
 type BudgetExternalLine = {
@@ -121,7 +137,7 @@ type PersistedGraph = {
   version: 1;
   savedAtISO: string;
   viewMode: ViewMode;
-  nodes: Node<GraphNodeData>[];
+  nodes: RFNode<GraphNodeData>[];
   edges: Edge<GraphEdgeData>[];
   edgeMode: 'radius' | 'bezier';
 };
@@ -141,7 +157,7 @@ type GraphState = {
   setEdgeMode: (m: EdgeMode) => void;
 
   // Graph data
-  nodes: Node<GraphNodeData>[];
+  nodes: RFNode<GraphNodeData>[];
   edges: Edge<GraphEdgeData>[];
 
   // Selection
@@ -177,6 +193,7 @@ type GraphState = {
 
   updatePersonMeta: (id: string, patch: Partial<PersonData>) => void;
   updateProjectStudio: (id: string, studio: Studio) => void;
+  updateProjectClient: (id: string, client: string) => void;
 
   updateEdgeLabel: (id: string, label: string) => void;
   updateEdgeConnection: (edgeId: string, newConn: Connection) => void;
@@ -198,13 +215,14 @@ const DOCK_SNAP_Y = 18;       // how close (px) to snap vertically
 const DOCK_SNAP_X = 14;       // how close (px) to snap horizontally (left-align)
 const APP_STORAGE_KEY = 'studio-ops-graph:v1';
 
-function selectedNodeStyle(isDark: boolean): React.CSSProperties {
+function selectedNodeStyle(is27b: boolean): React.CSSProperties {
+  const ring = is27b ? 'rgba(255, 8, 0, 0.18)' : 'rgba(0, 114, 49, 0.10)';
+  const band = is27b ? '#ff0800' : BUREAU_GREEN;
+
   return {
-    border: `1px solid ${BUREAU_GREEN}`,
-    boxShadow: isDark
-      ? `0 0 0 1px ${BUREAU_GREEN}, 0 12px 28px rgba(0,0,0,0.45)`
-      : `0 0 0 2px rgba(0,114,49,0.35), 0 10px 24px rgba(0,0,0,0.10)`,
-    zIndex: 50,
+    overflow: 'visible', // critical: never clip handles
+    boxShadow: `0 0 0 6px ${ring}, inset 0 -3px 0 0 ${band}`,
+    borderRadius: 14,
   };
 }
 
@@ -383,7 +401,7 @@ function turnoverTitle(t: TurnoverType) {
   return 'Net Ops Turnover';
 }
 
-function getNodeKindById(nodes: Node<GraphNodeData>[], id?: string | null): NodeKind | null {
+function getNodeKindById(nodes: RFNode<GraphNodeData>[], id?: string | null): NodeKind | null {
   if (!id) return null;
   const n = nodes.find((x) => x.id === id);
   if (!n) return null;
@@ -403,14 +421,13 @@ function reactFlowTypeForNode(kind: NodeKind): string {
 
 function tinyPort(): React.CSSProperties {
   return {
-    width: 14,
-    height: 14,
+    width: 12,
+    height: 12,
     borderRadius: 999,
     background: 'rgba(0,0,0,0.55)',
-    border: '2px solid rgba(255,255,255,0.85)',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-    cursor: 'crosshair',
-    pointerEvents: 'all',
+    border: '2px solid rgba(255,255,255,0.92)',
+    zIndex: 50,           // <- always above selection rings/bands
+    pointerEvents: 'auto',
   };
 }
 
@@ -438,7 +455,7 @@ case 'timeline':
   }
 }
 
-function edgeColorFromSource(nodes: Node<GraphNodeData>[], sourceId?: string | null) {
+function edgeColorFromSource(nodes: RFNode<GraphNodeData>[], sourceId?: string | null) {
   if (!sourceId) return 'rgba(0,0,0,0.35)';
   const source = nodes.find((n) => n.id === sourceId);
   if (!source) return 'rgba(0,0,0,0.35)';
@@ -446,7 +463,7 @@ function edgeColorFromSource(nodes: Node<GraphNodeData>[], sourceId?: string | n
   return 'rgba(0,0,0,0.35)';
 }
 
-function isValidConnectionStrict(nodes: Node<GraphNodeData>[], c: Connection) {
+function isValidConnectionStrict(nodes: RFNode<GraphNodeData>[], c: Connection) {
   if (!c.source || !c.target) return false;
 
   const sourceKind = getNodeKindById(nodes, c.source);
@@ -504,7 +521,7 @@ type ProjectDebits = {
 };
 
 function getBudgetIdsForProject(
-  nodes: Node<GraphNodeData>[],
+  nodes: RFNode<GraphNodeData>[],
   edges: Edge<GraphEdgeData>[],
   projectId: string
 ): string[] {
@@ -530,8 +547,124 @@ function getBudgetIdsForProject(
   return Array.from(ids);
 }
 
+
+
+function computeProjectBudgetTotals(
+  nodes: RFNode<GraphNodeData>[],
+  edges: Edge<GraphEdgeData>[],
+  projectId: string
+): { gross: number; net: number; budgetCount: number; signedCount: number } {
+  const budgetIds = getBudgetIdsForProject(nodes, edges, projectId);
+
+  let gross = 0;
+  let net = 0;
+
+  // placeholder until BudgetData gets a signed flag
+  let signedCount = 0;
+
+  for (const bid of budgetIds) {
+    const bn = nodes.find((n) => n.id === bid);
+    if (!bn || bn.data?.kind !== 'budget') continue;
+
+    const computed = computeBudgetNetForBudgetNode(nodes, edges, bid);
+
+    const grossTotal = computed?.grossTotal ?? budgetTotal(bn.data);
+    const netTotal = computed?.netTotal ?? budgetTotal(bn.data);
+
+    gross += safeNum(grossTotal);
+    net += safeNum(netTotal);
+
+    // forward-compatible: if later you add bn.data.signed boolean
+    if ((bn.data as any)?.signed) signedCount += 1;
+  }
+
+  return { gross, net, budgetCount: budgetIds.length, signedCount };
+}
+
+type DeptKey = 'ops' | 'design' | 'dev';
+
+function computeProjectTeamByDept(
+  nodes: RFNode<GraphNodeData>[],
+  edges: Edge<GraphEdgeData>[],
+  projectId: string
+): Record<DeptKey, string[]> {
+  const byId = new Map(nodes.map((n) => [n.id, n] as const));
+
+  const sets: Record<DeptKey, Set<string>> = {
+    ops: new Set<string>(),
+    design: new Set<string>(),
+    dev: new Set<string>(),
+  };
+
+  const isDept = (v: any): v is DeptKey => v === 'ops' || v === 'design' || v === 'dev';
+
+  for (const e of edges) {
+    const s = byId.get(e.source);
+    const t = byId.get(e.target);
+    if (!s || !t) continue;
+
+    const sKind = s.data?.kind;
+    const tKind = t.data?.kind;
+
+    // We consider a "team assignment" as: a person connected to a project's dept handle.
+    // Support both directions (in case user connected "backwards").
+    const projectIsTarget = e.target === projectId && sKind === 'person' && isDept((e as any).targetHandle);
+    const projectIsSource = e.source === projectId && tKind === 'person' && isDept((e as any).sourceHandle);
+
+    if (projectIsTarget) {
+      const dept = (e as any).targetHandle as DeptKey;
+      sets[dept].add(e.source); // person id
+    } else if (projectIsSource) {
+      const dept = (e as any).sourceHandle as DeptKey;
+      sets[dept].add(e.target); // person id
+    }
+  }
+
+  // Stable display ordering (by person title)
+  const sortByTitle = (ids: string[]) =>
+    ids
+      .map((pid) => ({ pid, title: String((byId.get(pid)?.data as any)?.title ?? '').trim() }))
+      .sort((a, b) => a.title.localeCompare(b.title))
+      .map((x) => x.pid);
+
+  return {
+    ops: sortByTitle(Array.from(sets.ops)),
+    design: sortByTitle(Array.from(sets.design)),
+    dev: sortByTitle(Array.from(sets.dev)),
+  };
+}
+
+function getTimelineIdsForProject(
+  nodes: RFNode<GraphNodeData>[],
+  edges: Edge<GraphEdgeData>[],
+  projectId: string
+): string[] {
+  const ids = new Set<string>();
+
+  for (const e of edges) {
+    if (e.source !== projectId && e.target !== projectId) continue;
+
+    const otherId = e.source === projectId ? e.target : e.source;
+    const other = nodes.find((n) => n.id === otherId);
+
+    if (other?.data?.kind === 'timeline') {
+      ids.add(otherId);
+    }
+  }
+
+  return Array.from(ids);
+}
+
+function computeProjectTimelineCount(
+  nodes: RFNode<GraphNodeData>[],
+  edges: Edge<GraphEdgeData>[],
+  projectId: string
+): number {
+  return getTimelineIdsForProject(nodes, edges, projectId).length;
+}
+
 function computeProjectDebits(
-  nodes: Node<GraphNodeData>[],
+  nodes: RFNode<GraphNodeData>[],
   edges: Edge<GraphEdgeData>[],
   projectId: string,
   opts?: { budgetId?: string }
@@ -616,7 +749,7 @@ function snapshotLinesFromProjectDebits(projectDebits: ProjectDebits): BudgetExt
 }
 
 function computeBudgetNetForBudgetNode(
-  nodes: Node<GraphNodeData>[],
+  nodes: RFNode<GraphNodeData>[],
   edges: Edge<GraphEdgeData>[],
   budgetNodeId: string
 ) {
@@ -687,7 +820,7 @@ function capacityStatus(projectCount: number) {
 /**
  * Auto-titles
  */
-function applyProjectTitleToTimeline(nodes: Node<GraphNodeData>[], projectId: string, timelineId: string) {
+function applyProjectTitleToTimeline(nodes: RFNode<GraphNodeData>[], projectId: string, timelineId: string) {
   const project = nodes.find((n) => n.id === projectId);
   const timeline = nodes.find((n) => n.id === timelineId);
   if (!project || !timeline) return nodes;
@@ -702,7 +835,7 @@ function applyProjectTitleToTimeline(nodes: Node<GraphNodeData>[], projectId: st
 }
 
 function applyProjectTitleToBudget(
-  nodes: Node<GraphNodeData>[],
+  nodes: RFNode<GraphNodeData>[],
   projectId: string,
   budgetId: string
 ) {
@@ -806,7 +939,7 @@ type DockState = {
   bottom?: { otherId: string };
 };
 
-function isDockableNode(n: Node<GraphNodeData>) {
+function isDockableNode(n: RFNode<GraphNodeData>) {
   const k = n.data?.kind as any;
   return k === 'budget' || k === 'timeline';
 }
@@ -818,7 +951,7 @@ function getNodeSize(n: any) {
 }
 
 function computeDockState(
-  nodes: Node<GraphNodeData>[],
+  nodes: RFNode<GraphNodeData>[],
   opts: { dockGap: number; snapDist: number; xSnapDist: number }
 ) {
   const { dockGap, snapDist, xSnapDist } = opts;
@@ -906,7 +1039,7 @@ const useGraph = create<GraphState>((set, get) => {
     // Edge mode (default = Radius)
     edgeMode: def.edgeMode ?? 'radius',
     setEdgeMode: (m: 'radius' | 'bezier') =>
-  set((s) => ({
+    set((s) => ({
     edgeMode: m,
     edges: s.edges.map((e) => ({
       ...e,
@@ -990,7 +1123,12 @@ const useGraph = create<GraphState>((set, get) => {
             id: `project-${nanoid(6)}`,
             type: 'projectNode',
             position: { x: 420, y: 240 + Math.random() * 320 },
-            data: { title: 'New Project', kind: 'project', studio: 'Antinomy Studio' },
+            data: {
+              kind: 'project',
+              title: 'New Project',
+              studio: 'Antinomy Studio',
+              client: '',
+},
           },
         ],
       })),
@@ -1091,6 +1229,14 @@ addLedger: () =>
   const isRadius = get().edgeMode === 'radius';
   const corner = get().edgeCornerRadius ?? 50;
 
+  const sourceKind = getNodeKindById(nodes, c.source);
+  const targetKind = getNodeKindById(nodes, c.target);
+
+  // We want Budget/Timeline to "feed into" Project visually.
+  // Without breaking ports, we keep the edge direction as-is and flip the arrow.
+  const isProjectToBudgetOrTimeline =
+    sourceKind === 'project' && (targetKind === 'budget' || targetKind === 'timeline');
+
   const newEdge: Edge<GraphEdgeData> = {
     id: `edge-${nanoid(8)}`,
     source: c.source!,
@@ -1098,7 +1244,20 @@ addLedger: () =>
     sourceHandle: c.sourceHandle ?? undefined,
     targetHandle: c.targetHandle ?? undefined,
     label,
-    markerEnd: { type: MarkerType.ArrowClosed },
+
+       // Arrow direction:
+    // - For Project→Budget/Timeline, show arrow at START (points into Project),
+    //   and explicitly remove markerEnd so the global defaultEdgeOptions doesn't add a second arrow.
+    // - Otherwise default arrow at END.
+    ...(isProjectToBudgetOrTimeline
+      ? {
+          markerStart: { type: MarkerType.ArrowClosed },
+          markerEnd: undefined,
+        }
+      : {
+          markerStart: undefined,
+          markerEnd: { type: MarkerType.ArrowClosed },
+        }),
 
     // Edge render mode
     type: isRadius ? 'smoothstep' : 'default',
@@ -1117,8 +1276,6 @@ addLedger: () =>
   set((s) => ({ edges: addEdge(newEdge, s.edges) }));
 
   // 2) Post-connect side-effects (titles/studio propagation only)
-  const sourceKind = getNodeKindById(nodes, c.source);
-  const targetKind = getNodeKindById(nodes, c.target);
 
   // Project → Timeline
   if (sourceKind === 'project' && targetKind === 'timeline') {
@@ -1330,6 +1487,15 @@ const nextBillToPhase =
     }),
   })),
 
+updateProjectClient: (id, client) =>
+  set((s) => ({
+    nodes: s.nodes.map((n) => {
+      if (n.id !== id) return n;
+      if (n.data.kind !== 'project') return n;
+      return { ...n, data: { ...(n.data as ProjectData), client } };
+    }),
+  })),
+
     updateTimelineDates: (id, patch) =>
       set((s) => ({
         nodes: s.nodes.map((n) => {
@@ -1529,86 +1695,22 @@ function CapacityNode({ id, data }: { id: string; data: GraphNodeData }) {
     </div>
   );
 }
-
-function ProjectNode({ data }: { data: GraphNodeData }) {
-  if (data.kind !== 'project') return null;
-
-  const studio = (data as any).studio ?? 'Antinomy Studio';
-const is27b = studio === '27b';
-  const TEAM_PORTS = [
-  { id: 'ops', label: 'Ops', top: 18 },
-  { id: 'design', label: 'Design', top: 48 },
-  { id: 'dev', label: 'Dev', top: 78 },
+// --- Shared port defs for Project nodes ---
+// IMPORTANT: these `y` values drive BOTH handle positions AND label positions.
+const PROJECT_TEAM_PORTS = [
+  { id: 'ops', label: 'OPS', y: 146 },
+  { id: 'design', label: 'DESIGN', y: 176 },
+  { id: 'dev', label: 'DEV', y: 206 },
 ] as const;
 
-const OUTPUT_PORTS = [
-  { id: 'budget', label: 'Budget', top: 38 },
-  { id: 'timeline', label: 'Timeline', top: 68 },
+const PROJECT_OUTPUT_PORTS = [
+  { id: 'budget', label: 'Budgets', y: 166 },
+  { id: 'timeline', label: 'Timelines', y: 196 },
 ] as const;
-const PORT_Y_OFFSET = 10;
 
-  return (
-    <div
-      style={card({
-        minWidth: 280,
-        background: is27b ? '#0b0b0c' : '#fbfbfc',
-        border: is27b ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(0,0,0,0.10)',
-        boxShadow: is27b ? '0 10px 24px rgba(0,0,0,0.40)' : '0 8px 20px rgba(0,0,0,0.06)',
-        color: is27b ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.92)',
-      })}
-    >
+const PROJECT_PORT_Y_OFFSET = 10;
 
-{/* Handles (use the same port defs as labels) */}
-{TEAM_PORTS.map((p) => (
-  <Handle
-    key={p.id}
-    type="target"
-    position={Position.Left}
-    id={String(p.id)}
-    style={{ ...tinyPort(), top: p.top + PORT_Y_OFFSET }}
-  />
-))}
-
-{OUTPUT_PORTS.map((p) => (
-  <Handle
-    key={p.id}
-    type="source"
-    position={Position.Right}
-    id={String(p.id)}
-    style={{ ...tinyPort(), top: p.top + PORT_Y_OFFSET }}
-  />
-))}
-
-      <div style={{ fontWeight: 650, fontSize: 13 }}>{data.title}</div>
-      <div style={{ fontSize: 11, opacity: 0.65 }}>
-  project •{' '}
-<span
-  style={{
-    fontWeight: 750,
-    color: is27b ? '#ff0800' : undefined, // 27b red
-  }}
->
-  {studio}
-</span>
-</div>
-
-      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.65 }}>
-        <div>
-          <div style={{ fontWeight: 650, opacity: 0.8 }}>Team</div>
-          <div>ops</div>
-          <div>design</div>
-          <div>dev</div>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontWeight: 650, opacity: 0.8 }}>Outputs</div>
-          <div>budget</div>
-          <div>timeline</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
+// --- Shared DockClip (define ONCE) ---
 function DockClip({ side }: { side: 'top' | 'bottom' }) {
   const isTop = side === 'top';
 
@@ -1648,6 +1750,394 @@ function DockClip({ side }: { side: 'top' | 'bottom' }) {
       />
     </>
   );
+}
+
+function CountBadge({ n }: { n: number }) {
+  return (
+    <span
+      style={{
+        height: 18,
+        minWidth: 18,
+        padding: '0 6px',          // makes 2–3 digits become a pill
+        borderRadius: 999,
+        background: BUREAU_GREEN,  // bureau green
+        color: 'white',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 12,
+        fontWeight: 900,
+        lineHeight: 1,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
+      }}
+    >
+      {n}
+    </span>
+  );
+}
+
+function ProjectNodeBase({ id, data }: { id: string; data: GraphNodeData }) {
+  if (data.kind !== 'project') return null;
+
+  const studio = (data as any).studio ?? 'Antinomy Studio';
+  const is27b = studio === '27b';
+  const client = String((data as any).client ?? '').trim();
+
+  const nodes = useGraph((s) => s.nodes);
+  const edges = useGraph((s) => s.edges);
+
+  // computed ONLY from budgets connected to THIS project
+  const { gross, net, budgetCount, signedCount } = computeProjectBudgetTotals(nodes, edges, id);
+
+  // timeline count connected to THIS project
+  const timelineCount = computeProjectTimelineCount(nodes, edges, id);
+
+  // team membership inferred from person ↔ project dept-handle edges
+  const teamByDept = computeProjectTeamByDept(nodes, edges, id);
+  const teamCount = {
+    ops: teamByDept.ops.length,
+    design: teamByDept.design.length,
+    dev: teamByDept.dev.length,
+  };
+
+  const railLabelBase: React.CSSProperties = {
+    fontFamily: 'var(--font-mono)',
+    fontWeight: 400,
+    fontSize: 12,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    opacity: is27b ? 0.78 : 0.72,
+  };
+
+  const CountBadge = ({ count }: { count: number }) => {
+    const s = String(count);
+    const isPill = s.length >= 2;
+    return (
+      <span
+        style={{
+          height: 18,
+          minWidth: 18,
+          padding: isPill ? '0 7px' : 0,
+          borderRadius: 999,
+          display: 'grid',
+          placeItems: 'center',
+          background: BUREAU_GREEN,
+          color: 'white',
+          fontSize: 11,
+          fontWeight: 600,
+          fontFamily: 'var(--font-mono)',
+          lineHeight: 1,
+        }}
+      >
+        {s}
+      </span>
+    );
+  };
+
+  const NamePill = ({ text }: { text: string }) => (
+    <span
+      style={{
+        height: 18,
+        padding: '0 8px',
+        borderRadius: 999,
+        display: 'inline-flex',
+        alignItems: 'center',
+        background: BUREAU_GREEN,
+        color: 'white',
+        fontSize: 11,
+        fontWeight: 600,
+        fontFamily: 'var(--font-mono)',
+        lineHeight: 1,
+      }}
+    >
+      {text}
+    </span>
+  );
+
+  const getPersonName = (pid: string) => {
+    const pn = nodes.find((n) => n.id === pid);
+    return String((pn?.data as any)?.title ?? '').trim();
+  };
+
+  const needsSignedAttention = budgetCount > 0 && signedCount < budgetCount;
+  const signedLabel = budgetCount === 0 ? '—' : `${signedCount}/${budgetCount}`;
+
+  return (
+    <div
+      style={card({
+        minWidth: 380,
+        maxWidth: 560,
+        position: 'relative',
+        overflow: 'visible',
+        background: is27b ? '#0b0b0c' : '#fbfbfc',
+        border: is27b ? '1px solid rgba(255,255,255,0.14)' : `1px solid ${BUREAU_GREEN}`,
+        boxShadow: is27b ? '0 10px 24px rgba(0,0,0,0.40)' : '0 8px 20px rgba(0,0,0,0.06), 0 0 0 2px rgba(0,114,49,0.06)',
+        color: is27b ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.92)',
+        padding: 18,
+      })}
+    >
+      {/* Handles */}
+      {PROJECT_TEAM_PORTS.map((p) => (
+        <Handle
+          key={p.id}
+          type="target"
+          position={Position.Left}
+          id={String(p.id)}
+          style={{ ...tinyPort(), top: p.y }}
+        />
+      ))}
+
+      {PROJECT_OUTPUT_PORTS.map((p) => (
+        <Handle
+          key={p.id}
+          type="source"
+          position={Position.Right}
+          id={String(p.id)}
+          style={{ ...tinyPort(), top: p.y }}
+        />
+      ))}
+
+      {/* Left rail labels (aligned to handles) + dept count badge (badge closest to node edge) */}
+{PROJECT_TEAM_PORTS.map((p) => {
+  const dept = p.id as 'ops' | 'design' | 'dev';
+  const c = teamCount[dept] ?? 0;
+
+  return (
+    <div
+      key={p.id}
+      style={{
+        position: 'absolute',
+        left: 26,
+        top: p.y,
+        transform: 'translateY(-50%)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        pointerEvents: 'none',
+        userSelect: 'none',
+      }}
+    >
+      {/* count first so it sits nearest the node edge */}
+      {c > 0 && <CountBadge count={c} />}
+
+      <span style={railLabelBase}>{String(p.label).toUpperCase()}</span>
+    </div>
+  );
+})}
+
+      {/* Right rail labels (aligned to handles) — label + count badge */}
+      <div
+        style={{
+          position: 'absolute',
+          right: 26,
+          top: 0,
+          bottom: 0,
+          pointerEvents: 'none',
+          userSelect: 'none',
+        }}
+      >
+        {/* Budgets */}
+        <div
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: PROJECT_OUTPUT_PORTS[0].y,
+            transform: 'translateY(-50%)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={railLabelBase}>{String(PROJECT_OUTPUT_PORTS[0].label).toUpperCase()}</span>
+          {budgetCount > 0 && <CountBadge count={budgetCount} />}
+        </div>
+
+        {/* Timelines */}
+        <div
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: PROJECT_OUTPUT_PORTS[1].y,
+            transform: 'translateY(-50%)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={railLabelBase}>{String(PROJECT_OUTPUT_PORTS[1].label).toUpperCase()}</span>
+          {timelineCount > 0 && <CountBadge count={timelineCount} />}
+        </div>
+      </div>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div
+          style={{
+            width: 16,
+            height: 16,
+            borderRadius: 999,
+            background: is27b ? '#ff0800' : BUREAU_GREEN,
+            boxShadow: '0 6px 18px rgba(0,0,0,0.08)',
+            marginTop: 6,
+            flex: '0 0 auto',
+          }}
+        />
+
+        <div
+          style={{
+            fontWeight: 900,
+            fontSize: 28,
+            letterSpacing: -0.4,
+            lineHeight: 1.08,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+          title={data.title}
+        >
+          {data.title}
+        </div>
+      </div>
+
+      {/* Meta line */}
+      <div
+        style={{
+          marginTop: 8,
+          fontSize: 11,
+          opacity: 0.7,
+          display: 'flex',
+          gap: 6,
+          alignItems: 'baseline',
+          flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ opacity: 0.65 }}>studio •</span>
+        <span style={{ fontWeight: 750, color: is27b ? '#ff0800' : undefined }}>{studio}</span>
+        <span style={{ opacity: 0.35 }}>·</span>
+        <span style={{ opacity: 0.65 }}>client •</span>
+        <span style={{ fontWeight: 650, opacity: client ? 0.9 : 0.45 }}>{client || 'Client —'}</span>
+      </div>
+
+      {/* Signed row */}
+      <div
+        style={{
+          marginTop: 16,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          fontSize: 12,
+          opacity: 0.82,
+        }}
+      >
+        <div style={{ fontWeight: 850 }}>Signed</div>
+        <div style={{ fontWeight: 900, fontSize: 18, opacity: 0.95 }}>{signedLabel}</div>
+
+        {needsSignedAttention && (
+          <div
+            title="Not all connected budgets are signed"
+            style={{
+              marginLeft: 2,
+              width: 18,
+              height: 18,
+              borderRadius: 999,
+              display: 'grid',
+              placeItems: 'center',
+              fontSize: 12,
+              fontWeight: 900,
+              lineHeight: 1,
+              color: is27b ? '#ff0800' : '#b45309',
+              background: is27b ? 'rgba(255,8,0,0.10)' : 'rgba(245,158,11,0.14)',
+              border: is27b ? '1px solid rgba(255,8,0,0.25)' : '1px solid rgba(245,158,11,0.30)',
+            }}
+          >
+            !
+          </div>
+        )}
+      </div>
+
+      {/* Reserve mid-zone for handles/rails */}
+      <div style={{ height: 108 }} />
+
+      {/* Team block (names as green pills) */}
+      <div style={{ marginTop: 4 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, opacity: is27b ? 0.75 : 0.65 }}>Team</div>
+
+        {(
+          [
+            { key: 'ops', label: 'OPS' },
+            { key: 'design', label: 'DES' },
+            { key: 'dev', label: 'DEV' },
+          ] as const
+        ).map((row) => {
+          const ids = teamByDept[row.key];
+          const names = ids.map(getPersonName).filter(Boolean);
+
+          const maxShown = 3;
+          const shown = names.slice(0, maxShown);
+          const extra = Math.max(0, names.length - shown.length);
+
+          return (
+            <div
+              key={row.key}
+              style={{
+                marginTop: 10,
+                display: 'grid',
+                gridTemplateColumns: '44px 1fr',
+                columnGap: 12,
+                alignItems: 'start',
+              }}
+            >
+              <div style={railLabelBase}>{row.label}</div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                {shown.length === 0 ? (
+                  <span style={{ opacity: is27b ? 0.45 : 0.4 }}>—</span>
+                ) : (
+                  <>
+                    {shown.map((n) => (
+                      <NamePill key={n} text={n} />
+                    ))}
+                    {extra > 0 && <NamePill text={`+${extra}`} />}
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Divider */}
+      <div
+        style={{
+          height: 1,
+          background: is27b ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)',
+          marginTop: 18,
+          marginBottom: 14,
+        }}
+      />
+
+      {/* Net / Gross */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', rowGap: 12 }}>
+        <div style={{ fontWeight: 900, fontSize: 18, letterSpacing: 0.2 }}>NET</div>
+        <div style={{ fontWeight: 900, fontSize: 18 }}>{formatEUR(net)}</div>
+
+        <div style={{ fontWeight: 850, fontSize: 18, opacity: 0.6 }}>GROSS</div>
+        <div style={{ fontWeight: 850, fontSize: 18, opacity: 0.6 }}>{formatEUR(gross)}</div>
+      </div>
+    </div>
+  );
+}
+
+// Keep both exports so you can switch nodeTypes between them.
+function ProjectNodeV2({ id, data }: { id: string; data: GraphNodeData }) {
+  return <ProjectNodeBase id={id} data={data} />;
+}
+
+function ProjectNodeV1({ id, data }: { id: string; data: GraphNodeData }) {
+  return <ProjectNodeBase id={id} data={data} />;
 }
 
 function BudgetNode({ id, data, selected }: NodeProps<GraphNodeData>) {
@@ -1949,7 +2439,7 @@ function TurnoverNode({ id, data }: { id: string; data: GraphNodeData }) {
 const nodeTypes = {
   personNode: PersonNode,
   capacityNode: CapacityNode,
-  projectNode: ProjectNode,
+  projectNode: ProjectNodeV2,
   budgetNode: BudgetNode,
   timelineNode: TimelineNode,
   turnoverNode: TurnoverNode,
@@ -2186,29 +2676,32 @@ const inputStyle: React.CSSProperties = {
 
 export default function Home() {
   const hasLoadedRef = useRef(false);
+
   const edgeMode = useGraph((s) => s.edgeMode);
   const setEdgeMode = useGraph((s) => s.setEdgeMode);
+
   const BTN_H = 30;
 
-const btnStyle: React.CSSProperties = {
-  height: BTN_H,
-  padding: '0 16px',
-  borderRadius: 14,
-  border: '1px solid rgba(0,0,0,0.12)',
-  background: 'rgba(255,255,255,0.85)',
-  fontSize: 14,
-  fontWeight: 600,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  lineHeight: 1,
-  cursor: 'pointer',
-};
+  const btnStyle: React.CSSProperties = {
+    height: BTN_H,
+    padding: '0 16px',
+    borderRadius: 14,
+    border: '1px solid rgba(0,0,0,0.12)',
+    background: 'rgba(255,255,255,0.85)',
+    fontSize: 14,
+    fontWeight: 600,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    cursor: 'pointer',
+  };
 
-const btnActiveStyle = {
-  ...btnStyle,
-  // ...your active overrides (border/background/etc) BUT do not change padding/height
-};
+  const btnActiveStyle = {
+    ...btnStyle,
+    // keep padding/height identical, only change border/background/etc if needed
+  };
+
   const {
     viewMode,
     setViewMode,
@@ -2229,6 +2722,7 @@ const btnActiveStyle = {
     updateNodeTitle,
     updatePersonMeta,
     updateProjectStudio,
+    updateProjectClient,
     updateBudgetPhases,
     updateTimelineDates,
     updateEdgeLabel,
@@ -2237,41 +2731,78 @@ const btnActiveStyle = {
     hydrateFromPersisted,
     resetGraph,
   } = useGraph();
+
   // --- Timeline Scrubber (FY: Jan → Dec) ---
-const FY_START = useMemo(() => new Date(new Date().getFullYear(), 0, 1), []);
-const TOTAL_WEEKS = 52;
+  const FY_START = useMemo(() => new Date(new Date().getFullYear(), 0, 1), []);
+  const TOTAL_WEEKS = 52;
 
-function addDays(date: Date, days: number) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
-}
+  function fmtShort(d: Date) {
+    return d.toLocaleDateString(undefined, { month: 'short', day: '2-digit' });
+  }
 
-function fmtShort(d: Date) {
-  // "Jan 24"
-  return d.toLocaleDateString(undefined, { month: 'short', day: '2-digit' });
-}
+  const today = useMemo(() => new Date(), []);
+  const initialWeek = useMemo(() => {
+    const diffMs = today.getTime() - FY_START.getTime();
+    const diffDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+    return Math.min(TOTAL_WEEKS, Math.floor(diffDays / 7));
+  }, [FY_START, today]);
 
-// Start on "today" (approx week index)
-const today = useMemo(() => new Date(), []);
-const initialWeek = useMemo(() => {
-  const diffMs = today.getTime() - FY_START.getTime();
-  const diffDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
-  return Math.min(TOTAL_WEEKS, Math.floor(diffDays / 7));
-}, [FY_START, today]);
+  const [scrubWeek, setScrubWeek] = useState<number>(0);
+  const [mounted, setMounted] = useState(false);
 
-const [scrubWeek, setScrubWeek] = useState<number>(0);
-const [mounted, setMounted] = useState(false);
+  // --- Flow shell ref (used to scope wheel interception) ---
+  const flowShellRef = useRef<HTMLDivElement | null>(null);
 
-useEffect(() => {
-  setMounted(true);
-}, []);
+  /**
+   * HARD BLOCK: Chrome back/forward on Mac trackpad swipe.
+   *
+   * Key change vs your current code:
+   * - Do NOT require dx > dy (trackpad swipes often include dy).
+   * - If there is *any* horizontal intent (deltaX != 0 OR shift+wheel), preventDefault.
+   * - Keep ctrlKey (pinch zoom) untouched.
+   */
+  useEffect(() => {
+    const handler = (e: WheelEvent) => {
+      // pinch-zoom (trackpad) often reports ctrlKey → do not interfere
+      if (e.ctrlKey) return;
 
-useEffect(() => {
-  setScrubWeek(initialWeek);
-}, [initialWeek]);
+      const shell = flowShellRef.current;
+      if (!shell) return;
 
-// Derived date from scrub position
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      // Only intercept events that originate inside the flow shell
+      if (!shell.contains(target)) return;
+
+      const dx = Math.abs(e.deltaX);
+
+      // shift+wheel is treated as horizontal scroll in many browsers
+      const horizontalIntent = dx > 0 || e.shiftKey;
+
+      if (horizontalIntent) {
+        // THIS is what stops Chrome history navigation
+        e.preventDefault();
+      }
+    };
+
+    // Capture + passive:false is mandatory or preventDefault gets ignored.
+    window.addEventListener('wheel', handler, { capture: true, passive: false });
+
+    return () => {
+      window.removeEventListener('wheel', handler as any, { capture: true } as any);
+    };
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    setScrubWeek(initialWeek);
+  }, [initialWeek]);
+
+  // Derived date from scrub position (uses your existing top-level addDays())
 const scrubDate = useMemo(() => addDays(FY_START, scrubWeek * 7), [FY_START, scrubWeek]);
 
 const selectedNodeId = useGraph((s) => s.selectedNodeId);
@@ -2754,7 +3285,7 @@ const masterTimelineItems = useMemo(() => {
             <div style={{ fontWeight: 650, fontSize: 12 }}>{selectedNode.data.kind.toUpperCase()} Node</div>
 
             <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-              Title
+              {selectedNode.data.kind === 'project' ? 'Project name' : 'Title'}
               <input
                 style={inputStyle}
                 value={selectedNode.data.title}
@@ -2880,22 +3411,45 @@ const masterTimelineItems = useMemo(() => {
             )}
             {selectedNode.data.kind === 'project' && (
   <>
-    <div style={{ marginTop: 12, fontWeight: 650, fontSize: 12, opacity: 0.85 }}>
-      Studio
+    <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700, opacity: 0.8 }}>
+      PROJECT Node
     </div>
 
+    {/* Studio */}
+    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Studio</div>
     <select
-      style={{ ...inputStyle, marginTop: 6 }}
-      value={(selectedNode.data as ProjectData).studio}
+      value={(selectedNode.data as ProjectData).studio ?? 'Antinomy Studio'}
       onChange={(e) => updateProjectStudio(selectedNode.id, e.target.value as Studio)}
+      style={{
+        marginTop: 6,
+        width: '100%',
+        padding: '10px 12px',
+        borderRadius: 12,
+        border: '1px solid rgba(0,0,0,0.10)',
+        background: 'white',
+        fontSize: 13,
+      }}
     >
-      <option value="27b">27b</option>
       <option value="Antinomy Studio">Antinomy Studio</option>
+      <option value="27b">27b</option>
     </select>
 
-    <div style={{ marginTop: 8, fontSize: 11, opacity: 0.6 }}>
-      This value will be used for finance rollups later.
-    </div>
+    {/* Client */}
+    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Client</div>
+    <input
+      value={(selectedNode.data as ProjectData).client ?? ''}
+      onChange={(e) => updateProjectClient(selectedNode.id, e.target.value)}
+      placeholder="e.g. Vast Space"
+      style={{
+        marginTop: 6,
+        width: '100%',
+        padding: '10px 12px',
+        borderRadius: 12,
+        border: '1px solid rgba(0,0,0,0.10)',
+        background: 'white',
+        fontSize: 13,
+      }}
+    />
   </>
 )}
 
@@ -3093,7 +3647,14 @@ const masterTimelineItems = useMemo(() => {
     Today
   </button>
 </div>
-    <ReactFlow
+
+<div
+  id="flow-shell"
+  ref={flowShellRef}
+  style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}
+  
+>
+  <ReactFlow
   nodes={displayNodes}
   edges={edges}
   nodeTypes={nodeTypes}
@@ -3106,11 +3667,11 @@ const masterTimelineItems = useMemo(() => {
   onEdgeUpdate={handleEdgeUpdate}
   onEdgeUpdateEnd={handleEdgeUpdateEnd}
   edgeUpdaterRadius={18}
-  panOnDrag={false}
-  panOnScroll
-  // panOnScrollMode="free"  // ❌ not supported by your current React Flow typings
-  zoomOnScroll={false}
-  zoomOnPinch={true}
+  panOnDrag={true}        // ✅ drag empty canvas to pan
+  panOnScroll={false}     // ✅ do not pan on wheel/trackpad scroll
+  zoomOnScroll={false}    // ✅ do not zoom on scroll
+  zoomOnPinch={true}      // ✅ pinch zoom stays
+  preventScrolling={true} // ✅ stop page scroll behind canvas
   isValidConnection={() => true}
   fitView
   minZoom={0.05}
@@ -3127,6 +3688,7 @@ const masterTimelineItems = useMemo(() => {
   <Controls />
   <Background />
 </ReactFlow>
+</div>
 </div>
 )}
 </div>
