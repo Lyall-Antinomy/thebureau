@@ -248,12 +248,12 @@ export default function LandingV2() {
                 </thead>
                 <tbody className="align-top">
                   {[
-                    ['Workflow operating map', '✅', '❌'],
-                    ['Key data visualisations', '✅', '❌'],
-                    ['Assign people to projects', '✅', '❌'],
+                    ['Operations prototyping canvas', '✅', '❌'],
+                    ['Critical data visualisation views', '✅', '❌'],
                     ['Budgets & financial rollups', '✅', '❌'],
+                    ['Real-time contractor negotiations', '✅', '❌'],
                     [
-                      'Resourcing & capacity',
+                      'Live resourcing & capacity planning',
                       '✅',
                       '❌',
                     ],
@@ -273,7 +273,7 @@ export default function LandingV2() {
             </div>
 
             <div className="mt-4 text-xs opacity-60">
-              Planning inputs only. No bank statements. Compensation fields are permissioned and
+              Planning prototype inputs only. No actual linked banking. Compensation and other sensitive fields are permissioned and
               never exposed to Contributors.
             </div>
           </div>
