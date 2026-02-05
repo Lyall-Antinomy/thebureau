@@ -91,7 +91,7 @@ export default function LandingV2() {
 
         <div className="mt-6 space-y-3">
           <p className="text-lg leading-relaxed opacity-80">
-            People. Projects. Budgets. Time. — Connected.
+            People. Projects. Budgets. Time — Connected
           </p>
 
           <p className="text-base leading-relaxed opacity-80">
@@ -177,8 +177,8 @@ export default function LandingV2() {
           <div className="mt-1 text-xs opacity-60">Included</div>
 
           <div className="mt-4 space-y-2 text-sm opacity-80">
-            <div>Desktop access</div>
-            <div>Executive View on mobile (read-only for Core)</div>
+            <div>Full Desktop access</div>
+            <div>Mobile Executive view</div>
             <div>All current features</div>
             <div>12 months of updates</div>
           </div>
@@ -216,8 +216,8 @@ export default function LandingV2() {
               <div className="mt-1 text-xs opacity-60">Per year</div>
 
               <div className="mt-4 space-y-2 text-sm opacity-80">
-                <div>Unlock the latest version of app</div>
-                <div>New features, & trust & security upgrades</div>
+                <div>Unlock the latest product version</div>
+                <div>Feature & security upgrades</div>
                 
               </div>
 
@@ -257,7 +257,7 @@ export default function LandingV2() {
                       '✅',
                       '❌',
                     ],
-                    ['Mobile Executive View', '✅', '❌'],
+                    ['Mobile Executive view', '✅', '❌'],
                     ['Mobile project list', '✅', '✅'],
                     ['Mobile session timer', '✅', '✅'],
                     ['Audit trail for sensitive changes', '✅', '❌'],
