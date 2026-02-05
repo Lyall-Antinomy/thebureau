@@ -67,7 +67,7 @@ export default function LandingV2() {
                 color: 'rgba(0,114,49,0.85)',
               }}
             >
-              Memo
+              External Memo
             </span>
           </div>
 
