@@ -168,19 +168,19 @@ export default function LandingV2() {
       <div>
         <div className="text-sm font-medium">Founding Workspace</div>
         <div className="mt-1 text-2xl font-medium tracking-tight">€799</div>
-        <div className="mt-1 text-xs opacity-60">One-time</div>
+        <div className="mt-1 text-xs opacity-60">One-time payment</div>
 
         <div className="mt-4 space-y-2 text-sm opacity-80">
           {/* Treat this like "Contributors 25" */}
-          <div className="text-sm font-medium">Core seats</div>
+          <div className="text-sm font-medium">Leadership</div>
           <div className="mt-1 text-2xl font-medium tracking-tight">10</div>
-          <div className="mt-1 text-xs opacity-60">Included</div>
+          <div className="mt-1 text-xs opacity-60">Executive seats Included</div>
 
           <div className="mt-4 space-y-2 text-sm opacity-80">
-            <div>Full Desktop access</div>
+            <div>Full Desktop app access</div>
             <div>Mobile Executive view</div>
             <div>All current features</div>
-            <div>12 months of updates</div>
+            <div>12 months of product updates</div>
           </div>
         </div>
       </div>
@@ -192,7 +192,7 @@ export default function LandingV2() {
       <div>
         <div className="text-sm font-medium">Contributors</div>
         <div className="mt-1 text-2xl font-medium tracking-tight">25</div>
-        <div className="mt-1 text-xs opacity-60">Included</div>
+        <div className="mt-1 text-xs opacity-60">Employee seats Included</div>
 
         <div className="mt-4 space-y-2 text-sm opacity-80">
           <div>Mobile-only</div>
@@ -242,7 +242,7 @@ export default function LandingV2() {
                 <thead className="text-xs opacity-60">
                   <tr>
                     <th className="py-2 pr-4 font-medium">Capability</th>
-                    <th className="py-2 pr-4 font-medium">Core</th>
+                    <th className="py-2 pr-4 font-medium">Leadership</th>
                     <th className="py-2 font-medium">Contributor</th>
                   </tr>
                 </thead>
