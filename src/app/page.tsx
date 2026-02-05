@@ -198,7 +198,7 @@ export default function LandingV2() {
           <div>Mobile-only</div>
           <div>Assigned projects</div>
           <div>Work session timer</div>
-          <div>Feeds actuals back into the system</div>
+          <div>Feeds logged time back into the system</div>
         </div>
 
         <div className="mt-4 text-sm">

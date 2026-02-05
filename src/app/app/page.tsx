@@ -1266,7 +1266,7 @@ addLedger: () =>
     ...(isRadius ? ({ pathOptions: { borderRadius: corner } } as any) : {}),
 
     style: {
-      strokeWidth: (c.source ?? '').startsWith('person') ? 3 : 2,
+      strokeWidth: (c.source ?? '').startsWith('person') ? 2 : 2,
       stroke: color,
     },
     data: { color },
