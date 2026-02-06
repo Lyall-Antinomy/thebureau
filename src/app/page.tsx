@@ -67,7 +67,7 @@ export default function LandingV2() {
                 color: 'rgba(0,114,49,0.85)',
               }}
             >
-              Audit yourself
+              external memo
             </span>
           </div>
 
@@ -167,7 +167,7 @@ export default function LandingV2() {
       {/* Founding */}
       <div>
         <div className="text-sm font-medium">Founding Workspace</div>
-        <div className="mt-1 text-2xl font-medium tracking-tight">€799</div>
+        <div className="mt-1 text-2xl font-medium tracking-tight">€299</div>
         <div className="mt-1 text-xs opacity-60">One-time payment</div>
 
         <div className="mt-4 space-y-2 text-sm opacity-80">
@@ -180,7 +180,13 @@ export default function LandingV2() {
             <div>Unlimited desktop access</div>
             <div>Mobile Executive view</div>
             <div>12 months of product updates</div>
+            <div>Dedicated support</div>
           </div>
+          <div className="mt-4 text-sm">
+          <span className="opacity-60">Scale:</span>{' '}
+          <span className="font-medium">€12 / month</span>{' '}
+          <span className="opacity-60">per additional 5 contributors</span>
+        </div>
         </div>
       </div>
 
@@ -203,7 +209,7 @@ export default function LandingV2() {
         <div className="mt-4 text-sm">
           <span className="opacity-60">Scale:</span>{' '}
           <span className="font-medium">€10 / month</span>{' '}
-          <span className="opacity-60">per additional 10 contributors</span>
+          <span className="opacity-60">per additional 5 contributors</span>
         </div>
       </div>
     </div>
@@ -211,12 +217,13 @@ export default function LandingV2() {
 
             <div className="rounded-2xl border border-black/10 p-4">
               <div className="text-sm font-medium">Annual Version Upgrade</div>
-              <div className="mt-1 text-2xl font-medium tracking-tight">€299</div>
+              <div className="mt-1 text-2xl font-medium tracking-tight">€179</div>
               <div className="mt-1 text-xs opacity-60">Per year</div>
 
               <div className="mt-4 space-y-2 text-sm opacity-80">
-                <div>Unlock the latest product version</div>
-                <div>Feature & security upgrades</div>
+                <div>Upgrade to the latest version</div>
+                <div>Feature & security improvements</div>
+                <div>Merch gift pack (Select items on checkout)</div>
                 
               </div>
 
@@ -256,7 +263,7 @@ export default function LandingV2() {
                       '✅',
                       '❌',
                     ],
-                    ['Mobile Executive view', '✅', '❌'],
+                    ['Mobile executive dashboard', '✅', '❌'],
                     ['Mobile project list', '✅', '✅'],
                     ['Mobile time stamping', '✅', '✅'],
                     ['Audit trail for sensitive changes', '✅', '❌'],
@@ -281,7 +288,7 @@ export default function LandingV2() {
         {/* Prototype → Test → Commit */}
         <section className="mt-12">
           <div className="rounded-2xl border border-black/10 p-4">
-            <div className="text-xs uppercase tracking-wide opacity-50">Q4, 2027 ... 20 Mins.</div>
+            <div className="text-xs uppercase tracking-wide opacity-50">Q4, 2027 in 20 Mins</div>
 
             <div className="mt-3 space-y-2 text-sm opacity-80">
               <div>
