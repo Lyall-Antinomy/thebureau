@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
   addEdge,
   Background,
@@ -23,7 +23,6 @@ import 'reactflow/dist/style.css';
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import MasterTimeline from '../MasterTimeline';
-
 /**
  * -------------------------
  * Types
@@ -148,7 +147,12 @@ type GraphState = {
   // View
   viewMode: ViewMode;
   setViewMode: (m: ViewMode) => void;
+  inspectorCollapsed: boolean;
+  setInspectorCollapsed: (v: boolean) => void;
+  toggleInspectorCollapsed: () => void;
 
+
+  
   edgeCornerRadius: number;
   setEdgeCornerRadius: (r: number) => void;
 
@@ -875,6 +879,27 @@ function readPersistedGraph(): PersistedGraph | null {
 if (!parsed || parsed.version !== 1) return null;
 if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
 
+const UI_STORAGE_KEY = 'studio-ops-ui:v1';
+
+type UiPrefs = {
+  inspectorCollapsed: boolean;
+};
+
+function readUiPrefs(): UiPrefs {
+  try {
+    const raw = localStorage.getItem(UI_STORAGE_KEY);
+    if (!raw) return { inspectorCollapsed: false };
+    const parsed = JSON.parse(raw);
+    return { inspectorCollapsed: !!parsed.inspectorCollapsed };
+  } catch {
+    return { inspectorCollapsed: false };
+  }
+}
+
+function writeUiPrefs(p: UiPrefs) {
+  localStorage.setItem(UI_STORAGE_KEY, JSON.stringify(p));
+}
+
 // --- MIGRATION: backfill studio on older graphs (prevents board reset) ---
 parsed.nodes = parsed.nodes.map((n: any) => {
   const kind = n?.data?.kind;
@@ -1026,11 +1051,50 @@ function computeDockState(
  */
 
 const useGraph = create<GraphState>((set, get) => {
+  
+  const ui =
+  typeof window !== 'undefined'
+    ? readUiPrefs()
+    : { inspectorCollapsed: false };
+
   const def = getDefaultGraph();
+
+  const UI_STORAGE_KEY = 'studio-ops-ui:v1';
+
+type UiPrefs = { inspectorCollapsed: boolean };
+
+function readUiPrefs(): UiPrefs {
+  try {
+    const raw = localStorage.getItem(UI_STORAGE_KEY);
+    if (!raw) return { inspectorCollapsed: false };
+    const parsed = JSON.parse(raw);
+    return { inspectorCollapsed: !!parsed.inspectorCollapsed };
+  } catch {
+    return { inspectorCollapsed: false };
+  }
+}
+
+function writeUiPrefs(p: UiPrefs) {
+  localStorage.setItem(UI_STORAGE_KEY, JSON.stringify(p));
+}
 
   return {
     viewMode: def.viewMode,
     setViewMode: (m: ViewMode) => set(() => ({ viewMode: m })),
+    
+// --- UI prefs (Inspector) ---
+inspectorCollapsed: ui.inspectorCollapsed,
+
+setInspectorCollapsed: (v: boolean) => {
+  set(() => ({ inspectorCollapsed: v }));
+  writeUiPrefs({ inspectorCollapsed: v });
+},
+
+toggleInspectorCollapsed: () => {
+  const next = !get().inspectorCollapsed;
+  set(() => ({ inspectorCollapsed: next }));
+  writeUiPrefs({ inspectorCollapsed: next });
+},
 
     // Corner radius for smoothstep edges
     edgeCornerRadius: 50,
@@ -1776,6 +1840,82 @@ function CountBadge({ n }: { n: number }) {
   );
 }
 
+function BureauToggle({
+  on,
+  onToggle,
+  label,
+}: {
+  on: boolean;
+  onToggle: () => void;
+  label?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      aria-pressed={on}
+      title={label ?? (on ? 'Collapse' : 'Expand')}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '6px 10px',
+        borderRadius: 999,
+        border: '1px solid rgba(0,0,0,0.10)',
+        background: 'rgba(255,255,255,0.92)',
+        boxShadow: '0 6px 16px rgba(0,0,0,0.06)',
+        cursor: 'pointer',
+        userSelect: 'none',
+      }}
+    >
+      {label && (
+        <span
+          style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            letterSpacing: 0.8,
+            textTransform: 'uppercase',
+            opacity: 0.7,
+          }}
+        >
+          {label}
+        </span>
+      )}
+
+      {/* track */}
+      <span
+        style={{
+          position: 'relative',
+          width: 34,
+          height: 18,
+          borderRadius: 999,
+          background: on ? 'rgba(0,114,49,0.18)' : 'rgba(0,0,0,0.10)',
+          border: on ? '1px solid rgba(0,114,49,0.35)' : '1px solid rgba(0,0,0,0.14)',
+          transition: 'all 140ms ease',
+        }}
+      >
+        {/* knob */}
+        <span
+          style={{
+            position: 'absolute',
+            top: 1,
+            left: on ? 17 : 1,
+            width: 14,
+            height: 14,
+            borderRadius: 999,
+            background: on ? '#007231' : 'rgba(0,0,0,0.35)',
+            boxShadow: '0 4px 10px rgba(0,0,0,0.18)',
+            transition: 'all 140ms ease',
+          }}
+        />
+      </span>
+    </button>
+  );
+}
+
 function ProjectNodeBase({ id, data }: { id: string; data: GraphNodeData }) {
   if (data.kind !== 'project') return null;
 
@@ -2097,9 +2237,9 @@ function ProjectNodeBase({ id, data }: { id: string; data: GraphNodeData }) {
                   <span style={{ opacity: is27b ? 0.45 : 0.4 }}>—</span>
                 ) : (
                   <>
-                    {shown.map((n) => (
-                      <NamePill key={n} text={n} />
-                    ))}
+                    {shown.map((n, i) => (
+  <NamePill key={`${n}-${i}`} text={n} />
+))}
                     {extra > 0 && <NamePill text={`+${extra}`} />}
                   </>
                 )}
@@ -2680,28 +2820,14 @@ export default function Home() {
   const edgeMode = useGraph((s) => s.edgeMode);
   const setEdgeMode = useGraph((s) => s.setEdgeMode);
 
-  const BTN_H = 30;
+  const inspectorCollapsed = useGraph((s) => s.inspectorCollapsed);
+  const toggleInspectorCollapsed = useGraph((s) => s.toggleInspectorCollapsed);
 
-  const btnStyle: React.CSSProperties = {
-    height: BTN_H,
-    padding: '0 16px',
-    borderRadius: 14,
-    border: '1px solid rgba(0,0,0,0.12)',
-    background: 'rgba(255,255,255,0.85)',
-    fontSize: 14,
-    fontWeight: 600,
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    lineHeight: 1,
-    cursor: 'pointer',
-  };
+  // Selection ids (declare ONCE)
+  const selectedNodeId = useGraph((s) => s.selectedNodeId);
+  const selectedEdgeId = useGraph((s) => s.selectedEdgeId);
 
-  const btnActiveStyle = {
-    ...btnStyle,
-    // keep padding/height identical, only change border/background/etc if needed
-  };
-
+  // Pull graph state/actions ONCE (must be above derived selection)
   const {
     viewMode,
     setViewMode,
@@ -2732,6 +2858,152 @@ export default function Home() {
     resetGraph,
   } = useGraph();
 
+  // Inspector sizing refs/state
+const inspectorWrapRef = useRef<HTMLDivElement | null>(null);
+const inspectorBodyRef = useRef<HTMLDivElement | null>(null);
+
+const [inspectorHeight, setInspectorHeight] = useState<number>(520);
+const [inspectorAtMax, setInspectorAtMax] = useState(false);
+
+// snap state (prevents slow “step-down” when deselecting)
+const [snapInspector, setSnapInspector] = useState(false);
+const snapInspectorRef = useRef(false);
+
+// Tuning
+const INSPECTOR_MIN = 52;          // collapsed header-only target
+const INSPECTOR_MIN_EXPANDED = 180; // when a node/edge is selected
+const INSPECTOR_BASELINE = 50;      // expanded, NO selection (edit this)
+
+// ✅ Derived selection (prevents stale content)
+const selectedNode = useMemo(
+  () => nodes.find((n) => n.id === selectedNodeId) ?? null,
+  [nodes, selectedNodeId]
+);
+
+const selectedEdge = useMemo(
+  () => edges.find((e) => e.id === selectedEdgeId) ?? null,
+  [edges, selectedEdgeId]
+);
+
+const hasSelection = !!selectedNode || !!selectedEdge;
+
+// ✅ Snap transition + mute ResizeObserver while returning to baseline
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+  if (inspectorCollapsed) return;
+
+  if (!hasSelection) {
+    setSnapInspector(true);
+    snapInspectorRef.current = true;
+
+    // jump immediately toward baseline (no long glide)
+    setInspectorHeight((h) => Math.min(h, INSPECTOR_BASELINE));
+
+    const t = window.setTimeout(() => {
+      setSnapInspector(false);
+      snapInspectorRef.current = false;
+    }, 180);
+
+    return () => window.clearTimeout(t);
+  }
+}, [hasSelection, inspectorCollapsed, INSPECTOR_BASELINE]);
+
+// Auto-fit Inspector height to content (expanded) + set inspectorAtMax
+useEffect(() => {
+  if (typeof window === 'undefined') return;
+
+  const wrapEl = inspectorWrapRef.current;
+  const bodyEl = inspectorBodyRef.current;
+
+  if (inspectorCollapsed) {
+    setInspectorHeight(INSPECTOR_MIN);
+    setInspectorAtMax(false);
+    return;
+  }
+
+  if (!wrapEl || !bodyEl) return;
+
+  const compute = () => {
+    const maxH = window.innerHeight - 24;
+
+    const headerEl = wrapEl.querySelector(
+      '[data-inspector-header="true"]'
+    ) as HTMLElement | null;
+
+    const headerH = headerEl ? headerEl.getBoundingClientRect().height : INSPECTOR_MIN;
+
+    // KEY FIX:
+    // When nothing is selected, DON'T let baseline body content set height.
+    // This is what was preventing you from shrinking below ~100+.
+    const bodyH = hasSelection ? bodyEl.scrollHeight : 0;
+
+    // wrapper padding top+bottom = 24, header/body gap = 10
+    const desired = 24 + 10 + headerH + bodyH;
+
+    const minExpanded = hasSelection ? INSPECTOR_MIN_EXPANDED : INSPECTOR_BASELINE;
+
+    const clamped = Math.min(maxH, Math.max(minExpanded, desired));
+
+    // Only allow scrolling when selection content truly overflows viewport
+    const needsScroll = hasSelection && desired > maxH + 1;
+
+    setInspectorHeight(clamped);
+    setInspectorAtMax(needsScroll);
+  };
+
+  // initial measure (2-pass helps when content mounts/unmounts)
+  const raf = window.requestAnimationFrame(() => {
+    compute();
+    window.requestAnimationFrame(compute);
+  });
+
+  const ro = new ResizeObserver(() => {
+    if (snapInspectorRef.current) return;
+    compute();
+  });
+  ro.observe(bodyEl);
+
+  window.addEventListener('resize', compute);
+
+  return () => {
+    window.cancelAnimationFrame(raf);
+    window.removeEventListener('resize', compute);
+    ro.disconnect();
+  };
+}, [
+  inspectorCollapsed,
+  hasSelection,
+  INSPECTOR_MIN,
+  INSPECTOR_MIN_EXPANDED,
+  INSPECTOR_BASELINE,
+  selectedNodeId,
+  selectedEdgeId,
+]);
+
+  const BTN_H = 30;
+
+  const btnStyle: React.CSSProperties = {
+    height: BTN_H,
+    padding: '0 16px',
+    borderRadius: 14,
+    border: '1px solid rgba(0,0,0,0.12)',
+    background: 'rgba(255,255,255,0.85)',
+    fontSize: 14,
+    fontWeight: 600,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: 1,
+    cursor: 'pointer',
+  };
+
+  const btnActiveStyle: React.CSSProperties = {
+    ...btnStyle,
+    // keep padding/height identical, only change border/background/etc if needed
+  };
+
+  // ...rest of Home() continues below
+
   // --- Timeline Scrubber (FY: Jan → Dec) ---
   const FY_START = useMemo(() => new Date(new Date().getFullYear(), 0, 1), []);
   const TOTAL_WEEKS = 52;
@@ -2753,17 +3025,35 @@ export default function Home() {
   // --- Flow shell ref (used to scope wheel interception) ---
   const flowShellRef = useRef<HTMLDivElement | null>(null);
 
+  // Cmd+\ toggles Inspector
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const isTypingTarget =
+        !!t &&
+        (t.tagName === 'INPUT' ||
+          t.tagName === 'TEXTAREA' ||
+          (t as any).isContentEditable);
+
+      if (isTypingTarget) return;
+
+      if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault();
+        toggleInspectorCollapsed();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [toggleInspectorCollapsed]);
+
   /**
    * HARD BLOCK: Chrome back/forward on Mac trackpad swipe.
-   *
-   * Key change vs your current code:
-   * - Do NOT require dx > dy (trackpad swipes often include dy).
-   * - If there is *any* horizontal intent (deltaX != 0 OR shift+wheel), preventDefault.
-   * - Keep ctrlKey (pinch zoom) untouched.
+   * Intercept wheel events inside the flow shell and preventDefault on any horizontal intent.
    */
   useEffect(() => {
     const handler = (e: WheelEvent) => {
-      // pinch-zoom (trackpad) often reports ctrlKey → do not interfere
+      // pinch-zoom often reports ctrlKey — do not interfere
       if (e.ctrlKey) return;
 
       const shell = flowShellRef.current;
@@ -2775,18 +3065,12 @@ export default function Home() {
       // Only intercept events that originate inside the flow shell
       if (!shell.contains(target)) return;
 
-      const dx = Math.abs(e.deltaX);
-
-      // shift+wheel is treated as horizontal scroll in many browsers
-      const horizontalIntent = dx > 0 || e.shiftKey;
-
-      if (horizontalIntent) {
-        // THIS is what stops Chrome history navigation
+      // Any horizontal delta or shift+wheel counts as horizontal intent
+      if (e.deltaX !== 0 || e.shiftKey) {
         e.preventDefault();
       }
     };
 
-    // Capture + passive:false is mandatory or preventDefault gets ignored.
     window.addEventListener('wheel', handler, { capture: true, passive: false });
 
     return () => {
@@ -2804,12 +3088,6 @@ export default function Home() {
 
   // Derived date from scrub position (uses your existing top-level addDays())
 const scrubDate = useMemo(() => addDays(FY_START, scrubWeek * 7), [FY_START, scrubWeek]);
-
-const selectedNodeId = useGraph((s) => s.selectedNodeId);
-const selectedEdgeId = useGraph((s) => s.selectedEdgeId);
-
-const selectedNode = useMemo(() => nodes.find((n) => n.id === selectedNodeId) ?? null, [nodes, selectedNodeId]);
-const selectedEdge = useMemo(() => edges.find((e) => e.id === selectedEdgeId) ?? null, [edges, selectedEdgeId]);
 
 /**
  * Persistence: prevent overwriting saved work on first paint
@@ -3226,324 +3504,397 @@ const masterTimelineItems = useMemo(() => {
     Reset
   </button>
 </div>
-      {/* Inspector */}
-      <div
-        style={{
-          position: 'absolute',
-          zIndex: 10,
-          right: 12,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          width: 340,
-          maxHeight: 'calc(100vh - 24px)',
-          overflow: 'auto',
-          background: 'rgba(255,255,255,0.92)',
-          padding: 12,
-          borderRadius: 18,
-          border: '1px solid rgba(0,0,0,0.08)',
-          boxShadow: '0 14px 30px rgba(0,0,0,0.08)',
-          backdropFilter: 'blur(6px)',
-        }}
-      >
-        <div style={{ fontWeight: 700, fontSize: 13 }}>Inspector</div>
-        <div style={{ opacity: 0.6, fontSize: 12, marginTop: 2 }}>Click a node or connection to edit it.</div>
+{/* Inspector */}
+<div
+  ref={inspectorWrapRef}
+  style={{
+    position: 'absolute',
+    zIndex: 10,
+    right: 12,
 
-        <div style={{ height: 10 }} />
+    // always vertically centered on the right rail
+    top: '50%',
+    transform: 'translateY(-50%)',
 
-        {selectedEdge && (
-          <div style={{ marginTop: 6 }}>
-            <div style={{ fontWeight: 650, fontSize: 12 }}>Connection</div>
-            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
-              {selectedEdge.source} → {selectedEdge.target}
-            </div>
+    width: 380, // constant width
 
-            <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-              Label
-              <input
-                style={inputStyle}
-                value={String(selectedEdge.label ?? '')}
-                onChange={(e) => updateEdgeLabel(selectedEdge.id, e.target.value)}
-              />
-            </label>
+    // vertical collapse/expand
+    height: inspectorCollapsed ? INSPECTOR_MIN : inspectorHeight,
+    maxHeight: 'calc(100vh - 24px)',
+    transition: snapInspector ? 'none' : 'height 180ms ease',
+    overflow: 'hidden',
 
-            <button
-              style={{
-                ...btnStyle,
-                marginTop: 10,
-                borderColor: 'rgba(220,38,38,0.25)',
-                color: 'rgba(220,38,38,0.9)',
-              }}
-              onClick={() => deleteEdge(selectedEdge.id)}
-            >
-              Delete connection
-            </button>
-          </div>
-        )}
+    background: 'rgba(255,255,255,0.92)',
+    padding: 12,
+    borderRadius: 18,
+    border: '1px solid rgba(0,0,0,0.08)',
+    boxShadow: '0 14px 30px rgba(0,0,0,0.08)',
+    backdropFilter: 'blur(6px)',
 
-        {selectedNode && (
-          <div style={{ marginTop: selectedEdge ? 18 : 6 }}>
-            <div style={{ fontWeight: 650, fontSize: 12 }}>{selectedNode.data.kind.toUpperCase()} Node</div>
+    display: 'flex',
+    flexDirection: 'column',
 
-            <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-              {selectedNode.data.kind === 'project' ? 'Project name' : 'Title'}
-              <input
-                style={inputStyle}
-                value={selectedNode.data.title}
-                onChange={(e) => updateNodeTitle(selectedNode.id, e.target.value)}
-              />
-            </label>
-
-            {selectedNode.data.kind === 'person' && (
-              <>
-                <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ fontSize: 12, opacity: 0.75 }}>Dept</div>
-                  <span
-                    style={{
-                      width: 12,
-                      height: 12, 
-                      borderRadius: 999,
-                      background: selectedNode.data.color,
-                      border: '1px solid rgba(0,0,0,0.08)',
-                    }}
-                  />
-                  <div style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>{deptLabel(selectedNode.data.dept)}</div>
-                </div>
-
-                <select
-                  style={{ ...inputStyle, marginTop: 6 }}
-                  value={selectedNode.data.dept}
-                  onChange={(e) => updatePersonMeta(selectedNode.id, { dept: e.target.value as Dept })}
-                >
-                  <option value="unassigned">Unassigned</option>
-                  <option value="ops">Operations</option>
-                  <option value="design">Design</option>
-                  <option value="dev">Engineering</option>
-                </select>
-
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, fontSize: 12 }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedNode.data.isExternal}
-                    onChange={(e) => updatePersonMeta(selectedNode.id, { isExternal: e.target.checked })}
-                  />
-                  External to org
-                </label>
-
-                <label
-                  style={{
-                    display: 'block',
-                    marginTop: 10,
-                    fontSize: 12,
-                    opacity: selectedNode.data.isExternal ? 0.9 : 0.45,
-                  }}
-                >
-                  External fee (EUR)
-                  <input
-                    style={inputStyle}
-                    type="number"
-                    disabled={!selectedNode.data.isExternal}
-                    value={selectedNode.data.externalFeeEUR}
-                    onChange={(e) => updatePersonMeta(selectedNode.id, { externalFeeEUR: Number(e.target.value) })}
-                  />
-                </label>
-
-                <div style={{ height: 10 }} />
-
-                <div style={{ marginTop: 6, fontWeight: 650, fontSize: 12, opacity: 0.85 }}>
-                  Bill external fee to
-                </div>
-
-                <label
-                  style={{
-                    display: 'block',
-                    marginTop: 10,
-                    fontSize: 12,
-                    opacity: selectedNode.data.isExternal ? 0.9 : 0.45,
-                  }}
-                >
-                  Budget
-                  <select
-                    style={inputStyle}
-                    disabled={!selectedNode.data.isExternal}
-                    value={String((selectedNode.data as PersonData).billToBudgetId ?? '')}
-                    onChange={(e) =>
-                      updatePersonMeta(selectedNode.id, {
-                        billToBudgetId: e.target.value ? e.target.value : null,
-                      })
-                    }
-                  >
-                    <option value="">Unassigned</option>
-                    {nodes
-                      .filter((n) => n.data.kind === 'budget')
-                      .map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {(b.data as BudgetData).title}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-
-                <label
-                  style={{
-                    display: 'block',
-                    marginTop: 10,
-                    fontSize: 12,
-                    opacity: selectedNode.data.isExternal ? 0.9 : 0.45,
-                  }}
-                >
-                  Phase
-                  <select
-                    style={inputStyle}
-                    disabled={!selectedNode.data.isExternal}
-                    value={String((selectedNode.data as PersonData).billToPhase ?? 'design')}
-                    onChange={(e) =>
-                      updatePersonMeta(selectedNode.id, {
-                        billToPhase: e.target.value as any,
-                      })
-                    }
-                  >
-                    <option value="design">Design</option>
-                    <option value="dev">Engineering</option>
-                    <option value="ops">Ops</option>
-                  </select>
-                </label>
-              </>
-            )}
-            {selectedNode.data.kind === 'project' && (
-  <>
-    <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700, opacity: 0.8 }}>
-      PROJECT Node
+    // make expand feel like it “grows down” from the header
+    transformOrigin: 'top right',
+  }}
+>
+  {/* Header row always visible (ResizeObserver expects this attr) */}
+  <div
+    data-inspector-header="true"
+    style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+    }}
+  >
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontWeight: 800, fontSize: 13, lineHeight: 1.1 }}>Inspector</div>
+      {!inspectorCollapsed && (
+        <div style={{ opacity: 0.6, fontSize: 12, marginTop: 2 }}>
+          Click a node or connection to edit it.
+        </div>
+      )}
     </div>
 
-    {/* Studio */}
-    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Studio</div>
-    <select
-      value={(selectedNode.data as ProjectData).studio ?? 'Antinomy Studio'}
-      onChange={(e) => updateProjectStudio(selectedNode.id, e.target.value as Studio)}
+    <BureauToggle on={!inspectorCollapsed} onToggle={toggleInspectorCollapsed} label="" />
+  </div>
+
+  <div style={{ height: 10 }} />
+
+  {/* Collapsed hint OR Expanded body */}
+  {inspectorCollapsed ? (
+    <div
       style={{
-        marginTop: 6,
-        width: '100%',
-        padding: '10px 12px',
-        borderRadius: 12,
-        border: '1px solid rgba(0,0,0,0.10)',
-        background: 'white',
-        fontSize: 13,
+        flex: 1,
+        display: 'grid',
+        placeItems: 'center',
+        padding: 8,
       }}
     >
-      <option value="Antinomy Studio">Antinomy Studio</option>
-      <option value="27b">27b</option>
-    </select>
+      <div style={{ fontSize: 11, opacity: 0.55, fontFamily: 'var(--font-mono)' }}>
+        Cmd+\ to open
+      </div>
+    </div>
+  ) : (
+    <div
+  key={`${selectedNodeId ?? 'none'}:${selectedEdgeId ?? 'none'}`}
+  ref={inspectorBodyRef}
+  style={{
+    // ✅ critical: don't force tall body unless we're at max
+    flex: inspectorAtMax ? 1 : '0 0 auto',
+    overflowY: inspectorAtMax ? 'auto' : 'visible',
+    overflowX: 'hidden',
+    paddingBottom: 12,
+    paddingRight: 2,
 
-    {/* Client */}
-    <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Client</div>
-    <input
-      value={(selectedNode.data as ProjectData).client ?? ''}
-      onChange={(e) => updateProjectClient(selectedNode.id, e.target.value)}
-      placeholder="e.g. Vast Space"
-      style={{
-        marginTop: 6,
-        width: '100%',
-        padding: '10px 12px',
-        borderRadius: 12,
-        border: '1px solid rgba(0,0,0,0.10)',
-        background: 'white',
-        fontSize: 13,
+        // ✅ hide scrollbar chrome (Firefox/IE/Edge legacy)
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
       }}
-    />
-  </>
-)}
+    >
+      {/* Selected NODE */}
+      {selectedNode && (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ fontWeight: 650, fontSize: 12 }}>
+            {String((selectedNode.data as any)?.kind ?? '').toUpperCase()} Node
+          </div>
 
-            {selectedNode.data.kind === 'budget' && (
-              <>
-                <div style={{ marginTop: 12, fontWeight: 650, fontSize: 12, opacity: 0.85 }}>Phase amounts</div>
+          <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+            {(selectedNode.data as any).kind === 'project' ? 'Project name' : 'Title'}
+            <input
+              style={inputStyle}
+              value={String((selectedNode.data as any).title ?? '')}
+              onChange={(e) => updateNodeTitle(selectedNode.id, e.target.value)}
+            />
+          </label>
 
-                <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-                  Design
-                  <input
-                    style={inputStyle}
-                    type="number"
-                    value={selectedNode.data.designAmount}
-                    onChange={(e) => updateBudgetPhases(selectedNode.id, { designAmount: Number(e.target.value) })}
-                  />
-                </label>
-
-                <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-                  Technology (Engineering)
-                  <input
-                    style={inputStyle}
-                    type="number"
-                    value={selectedNode.data.devAmount}
-                    onChange={(e) => updateBudgetPhases(selectedNode.id, { devAmount: Number(e.target.value) })}
-                  />
-                </label>
-
-                <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-                  Ops
-                  <input
-                    style={inputStyle}
-                    type="number"
-                    value={selectedNode.data.opsAmount}
-                    onChange={(e) => updateBudgetPhases(selectedNode.id, { opsAmount: Number(e.target.value) })}
-                  />
-                </label>
-
-                <div
+          {(selectedNode.data as any).kind === 'person' && (
+            <>
+              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ fontSize: 12, opacity: 0.75 }}>Dept</div>
+                <span
                   style={{
-                    marginTop: 10,
-                    padding: 10,
-                    borderRadius: 12,
-                    background: 'rgba(0,0,0,0.03)',
+                    width: 12,
+                    height: 12,
+                    borderRadius: 999,
+                    background: (selectedNode.data as any).color,
                     border: '1px solid rgba(0,0,0,0.08)',
                   }}
-                >
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Total</div>
-                  <div style={{ fontWeight: 750, fontSize: 14 }}>{formatEUR(budgetTotal(selectedNode.data))}</div>
+                />
+                <div style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>
+                  {deptLabel((selectedNode.data as any).dept)}
                 </div>
-              </>
-            )}
+              </div>
 
-            {selectedNode.data.kind === 'timeline' && (
-              <>
-                <div style={{ marginTop: 12, fontWeight: 650, fontSize: 12, opacity: 0.85 }}>Date range</div>
+              <select
+                style={{ ...inputStyle, marginTop: 6 }}
+                value={(selectedNode.data as any).dept}
+                onChange={(e) => updatePersonMeta(selectedNode.id, { dept: e.target.value as Dept })}
+              >
+                <option value="unassigned">Unassigned</option>
+                <option value="ops">Operations</option>
+                <option value="design">Design</option>
+                <option value="dev">Engineering</option>
+              </select>
 
-                <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-                  Start
-                  <input
-                    style={inputStyle}
-                    type="date"
-                    value={selectedNode.data.startDate}
-                    onChange={(e) => updateTimelineDates(selectedNode.id, { startDate: e.target.value })}
-                  />
-                </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean((selectedNode.data as any).isExternal)}
+                  onChange={(e) => updatePersonMeta(selectedNode.id, { isExternal: e.target.checked })}
+                />
+                External to org
+              </label>
 
-                <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-                  End
-                  <input
-                    style={inputStyle}
-                    type="date"
-                    value={selectedNode.data.endDate}
-                    onChange={(e) => updateTimelineDates(selectedNode.id, { endDate: e.target.value })}
-                  />
-                </label>
-              </>
-            )}
+              <label
+                style={{
+                  display: 'block',
+                  marginTop: 10,
+                  fontSize: 12,
+                  opacity: (selectedNode.data as any).isExternal ? 0.9 : 0.45,
+                }}
+              >
+                External fee (EUR)
+                <input
+                  style={inputStyle}
+                  type="number"
+                  disabled={!(selectedNode.data as any).isExternal}
+                  value={Number((selectedNode.data as any).externalFeeEUR ?? 0)}
+                  onChange={(e) => updatePersonMeta(selectedNode.id, { externalFeeEUR: Number(e.target.value) })}
+                />
+              </label>
+
+              <div style={{ height: 10 }} />
+
+              <div style={{ marginTop: 6, fontWeight: 650, fontSize: 12, opacity: 0.85 }}>
+                Bill external fee to
+              </div>
+
+              <label
+                style={{
+                  display: 'block',
+                  marginTop: 10,
+                  fontSize: 12,
+                  opacity: (selectedNode.data as any).isExternal ? 0.9 : 0.45,
+                }}
+              >
+                Budget
+                <select
+                  style={inputStyle}
+                  disabled={!(selectedNode.data as any).isExternal}
+                  value={String(((selectedNode.data as PersonData).billToBudgetId ?? '') as any)}
+                  onChange={(e) =>
+                    updatePersonMeta(selectedNode.id, {
+                      billToBudgetId: e.target.value ? e.target.value : null,
+                    })
+                  }
+                >
+                  <option value="">Unassigned</option>
+                  {nodes
+                    .filter((n) => n.data.kind === 'budget')
+                    .map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {(b.data as BudgetData).title}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label
+                style={{
+                  display: 'block',
+                  marginTop: 10,
+                  fontSize: 12,
+                  opacity: (selectedNode.data as any).isExternal ? 0.9 : 0.45,
+                }}
+              >
+                Phase
+                <select
+                  style={inputStyle}
+                  disabled={!(selectedNode.data as any).isExternal}
+                  value={String(((selectedNode.data as PersonData).billToPhase ?? 'design') as any)}
+                  onChange={(e) =>
+                    updatePersonMeta(selectedNode.id, {
+                      billToPhase: e.target.value as any,
+                    })
+                  }
+                >
+                  <option value="design">Design</option>
+                  <option value="dev">Engineering</option>
+                  <option value="ops">Ops</option>
+                </select>
+              </label>
+            </>
+          )}
+
+          {(selectedNode.data as any).kind === 'project' && (
+            <>
+              <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700, opacity: 0.8 }}>PROJECT Node</div>
+
+              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Studio</div>
+              <select
+                value={((selectedNode.data as ProjectData).studio ?? 'Antinomy Studio') as any}
+                onChange={(e) => updateProjectStudio(selectedNode.id, e.target.value as Studio)}
+                style={{
+                  marginTop: 6,
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 12,
+                  border: '1px solid rgba(0,0,0,0.10)',
+                  background: 'white',
+                  fontSize: 13,
+                }}
+              >
+                <option value="Antinomy Studio">Antinomy Studio</option>
+                <option value="27b">27b</option>
+              </select>
+
+              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Client</div>
+              <input
+                value={String((selectedNode.data as ProjectData).client ?? '')}
+                onChange={(e) => updateProjectClient(selectedNode.id, e.target.value)}
+                placeholder="e.g. Vast Space"
+                style={{
+                  marginTop: 6,
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 12,
+                  border: '1px solid rgba(0,0,0,0.10)',
+                  background: 'white',
+                  fontSize: 13,
+                }}
+              />
+            </>
+          )}
+
+          {(selectedNode.data as any).kind === 'budget' && (
+            <>
+              <div style={{ marginTop: 12, fontWeight: 650, fontSize: 12, opacity: 0.85 }}>Phase amounts</div>
+
+              <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+                Design
+                <input
+                  style={inputStyle}
+                  type="number"
+                  value={Number((selectedNode.data as any).designAmount ?? 0)}
+                  onChange={(e) => updateBudgetPhases(selectedNode.id, { designAmount: Number(e.target.value) })}
+                />
+              </label>
+
+              <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+                Technology (Engineering)
+                <input
+                  style={inputStyle}
+                  type="number"
+                  value={Number((selectedNode.data as any).devAmount ?? 0)}
+                  onChange={(e) => updateBudgetPhases(selectedNode.id, { devAmount: Number(e.target.value) })}
+                />
+              </label>
+
+              <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+                Ops
+                <input
+                  style={inputStyle}
+                  type="number"
+                  value={Number((selectedNode.data as any).opsAmount ?? 0)}
+                  onChange={(e) => updateBudgetPhases(selectedNode.id, { opsAmount: Number(e.target.value) })}
+                />
+              </label>
+
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: 10,
+                  borderRadius: 12,
+                  background: 'rgba(0,0,0,0.03)',
+                  border: '1px solid rgba(0,0,0,0.08)',
+                }}
+              >
+                <div style={{ fontSize: 12, opacity: 0.7 }}>Total</div>
+                <div style={{ fontWeight: 750, fontSize: 14 }}>
+                  {formatEUR(budgetTotal(selectedNode.data as any))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {(selectedNode.data as any).kind === 'timeline' && (
+            <>
+              <div style={{ marginTop: 12, fontWeight: 650, fontSize: 12, opacity: 0.85 }}>Date range</div>
+
+              <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+                Start
+                <input
+                  style={inputStyle}
+                  type="date"
+                  value={String((selectedNode.data as any).startDate ?? '')}
+                  onChange={(e) => updateTimelineDates(selectedNode.id, { startDate: e.target.value })}
+                />
+              </label>
+
+              <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+                End
+                <input
+                  style={inputStyle}
+                  type="date"
+                  value={String((selectedNode.data as any).endDate ?? '')}
+                  onChange={(e) => updateTimelineDates(selectedNode.id, { endDate: e.target.value })}
+                />
+              </label>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Selected EDGE */}
+      {selectedEdge && (
+        <div style={{ marginTop: selectedNode ? 18 : 6 }}>
+          <div style={{ fontWeight: 650, fontSize: 12 }}>Connection</div>
+          <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
+            {selectedEdge.source} → {selectedEdge.target}
           </div>
-        )}
 
-        {!selectedNode && !selectedEdge && (
-          <div
+          <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+            Label
+            <input
+              style={inputStyle}
+              value={String(selectedEdge.label ?? '')}
+              onChange={(e) => updateEdgeLabel(selectedEdge.id, e.target.value)}
+            />
+          </label>
+
+          <button
             style={{
-              marginTop: 14,
-              padding: 12,
-              borderRadius: 14,
-              background: 'rgba(0,0,0,0.03)',
-              border: '1px solid rgba(0,0,0,0.08)',
+              ...btnStyle,
+              marginTop: 10,
+              borderColor: 'rgba(220,38,38,0.25)',
+              color: 'rgba(220,38,38,0.9)',
             }}
+            onClick={() => deleteEdge(selectedEdge.id)}
           >
-            <div style={{ fontSize: 12, opacity: 0.65 }}>Nothing selected. Click a node to edit metadata.</div>
-          </div>
-        )}
-      </div>
+            Delete connection
+          </button>
+        </div>
+      )}
+    </div>
+  )}
+
+  <style jsx>{`
+    .inspectorBody::-webkit-scrollbar {
+      width: 0 !important;
+      height: 0 !important;
+      display: none !important;
+    }
+    .inspectorBody::-webkit-scrollbar-thumb {
+      background: transparent !important;
+    }
+    .inspectorBody::-webkit-scrollbar-track {
+      background: transparent !important;
+    }
+  `}</style>
+</div>
+
 
       {/* Views */}
       {viewMode === 'timeline' ? (
@@ -3654,15 +4005,28 @@ const masterTimelineItems = useMemo(() => {
   style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}
   
 >
-  <ReactFlow
+ <ReactFlow
   nodes={displayNodes}
   edges={edges}
   nodeTypes={nodeTypes}
   onConnect={onConnect}
   onNodesChange={onNodesChange}
   onEdgesChange={onEdgesChange}
-  onNodeClick={(_, node) => selectNode(node.id)}
-  onEdgeClick={(_, edge) => selectEdge(edge.id)}
+  onNodeClick={(e, node) => {
+    e.stopPropagation();
+    selectEdge(null as any); // clear edge selection when selecting a node
+    selectNode(node.id);
+  }}
+  onEdgeClick={(e, edge) => {
+    e.stopPropagation();
+    selectNode(null as any); // clear node selection when selecting an edge
+    selectEdge(edge.id);
+  }}
+  onPaneClick={(e) => {
+    e.stopPropagation();
+    selectNode(null as any);
+    selectEdge(null as any);
+  }}
   onEdgeUpdateStart={handleEdgeUpdateStart}
   onEdgeUpdate={handleEdgeUpdate}
   onEdgeUpdateEnd={handleEdgeUpdateEnd}
@@ -3673,7 +4037,7 @@ const masterTimelineItems = useMemo(() => {
   zoomOnPinch={true}      // ✅ pinch zoom stays
   preventScrolling={true} // ✅ stop page scroll behind canvas
   isValidConnection={() => true}
-  fitView
+  defaultViewport={{ x: 0, y: 0, zoom: 0.75 }}
   minZoom={0.05}
   maxZoom={2.5}
   defaultEdgeOptions={{
