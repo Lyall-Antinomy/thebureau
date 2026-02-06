@@ -67,7 +67,7 @@ export default function LandingV2() {
                 color: 'rgba(0,114,49,0.85)',
               }}
             >
-              External Memo
+              Audit yourself
             </span>
           </div>
 
@@ -177,9 +177,8 @@ export default function LandingV2() {
           <div className="mt-1 text-xs opacity-60">Executive seats Included</div>
 
           <div className="mt-4 space-y-2 text-sm opacity-80">
-            <div>Full Desktop app access</div>
+            <div>Unlimited desktop access</div>
             <div>Mobile Executive view</div>
-            <div>All current features</div>
             <div>12 months of product updates</div>
           </div>
         </div>
@@ -198,7 +197,7 @@ export default function LandingV2() {
           <div>Mobile-only</div>
           <div>Assigned projects</div>
           <div>Work session timer</div>
-          <div>Feeds logged time back into the system</div>
+          <div>Feeds data back into the system</div>
         </div>
 
         <div className="mt-4 text-sm">
@@ -251,7 +250,7 @@ export default function LandingV2() {
                     ['Operations prototyping canvas', '✅', '❌'],
                     ['Critical data visualisation views', '✅', '❌'],
                     ['Budgets & financial rollups', '✅', '❌'],
-                    ['Real-time contractor negotiations', '✅', '❌'],
+                    ['Contractor negotiation tools', '✅', '❌'],
                     [
                       'Live resourcing & capacity planning',
                       '✅',
@@ -259,7 +258,7 @@ export default function LandingV2() {
                     ],
                     ['Mobile Executive view', '✅', '❌'],
                     ['Mobile project list', '✅', '✅'],
-                    ['Mobile session timer', '✅', '✅'],
+                    ['Mobile time stamping', '✅', '✅'],
                     ['Audit trail for sensitive changes', '✅', '❌'],
                   ].map(([cap, core, contrib]) => (
                     <tr key={cap} className="border-t border-black/5">
@@ -282,7 +281,7 @@ export default function LandingV2() {
         {/* Prototype → Test → Commit */}
         <section className="mt-12">
           <div className="rounded-2xl border border-black/10 p-4">
-            <div className="text-xs uppercase tracking-wide opacity-50">Prototype → Test → Commit</div>
+            <div className="text-xs uppercase tracking-wide opacity-50">Q4, 2027 ... 20 Mins.</div>
 
             <div className="mt-3 space-y-2 text-sm opacity-80">
               <div>
