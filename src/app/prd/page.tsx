@@ -42,7 +42,7 @@ export default function InvestorOnePager() {
           <p className="text-lg leading-relaxed opacity-80">People. Projects. Budgets. Time — Connected.</p>
 
           <p className="text-base leading-relaxed opacity-80">
-            The Bureau is a visual operating layer for creative and technology studios. It connects resourcing, timelines, and commercial reality
+            The Bureau is a visual operating layer for the creative and technology sector. It connects resourcing, timelines, and commercial reality
             into one living map so leaders can make critical decisions without app switching or hunting for data.
           </p>
 
@@ -63,7 +63,7 @@ export default function InvestorOnePager() {
           <div className="mt-4 rounded-2xl border border-black/10 p-4">
             <div className="space-y-2 text-sm opacity-80">
               <div>Studio operations live in fragments: Bloated PM tools (granular task managers), permissioned finance tools (sensitive accounting), mind-numbing spreadsheets (poor UX), and complex studio databases (noisy).</div>
-              <div>Decisions slow down. Constraints get missed. Overload arrives late. Margin becomes guesswork. 
+              <div>Decisions slow down. Constraints are misinterpreted. Overload warning arrives too late. Margin becomes guesswork. 
                 Critical reporting must be reconstructed from fragmented data across a suite of permissioned operational apps and software.</div>
             </div>
           </div>
@@ -76,28 +76,28 @@ export default function InvestorOnePager() {
           <div className="mt-4 rounded-2xl border border-black/10 p-4">
             <div className="space-y-2 text-sm opacity-80">
               <div>
-                A node-based operating map where instances of resources, projects, budgets, and timelines are visually wired together.
-                Prototype mutiple scenarios across the financial year by simply moving and connecting objects on a familiar canvas.
+                A flexible canvas, and node-based operating map - where instances of resources, projects, budgets, and timelines are visually wired together.
+                Prototype mutiple scenarios across the financial year by simply moving and connecting objects on a familiar canvas while the forecast updates in real-time.
               </div>
               
             </div>
           </div>
         </section>
 
-         {/* Strategic Comparison */}
+         {/* Strategic Audit */}
         <section className="mt-12">
-          <div className="text-xs uppercase tracking-wide opacity-50">Strategic Comparison</div>
+          <div className="text-xs uppercase tracking-wide opacity-50">Strategic Audit</div>
 
           <div className="mt-4 rounded-2xl border border-black/10 p-4">
             <div className="space-y-2 text-sm opacity-80">
               <div>
-                The Bureau isn’t trying to out-feature tools like Asana, Monday.com or Celoxis - it’s solving a different problem. 
+                The Bureau isn’t trying to out-feature tools like Asana, Monday, Linear, Notion, Jira, or Celoxis - it’s solving a different problem. 
                 Those platforms are powerful ops & analytic systems, but they get that power from a structure riddled with dependencies: 
-                daily task statuses, fields, permissions, and ongoing upkeep. 
-                In practice, that means they only remain true if a layer of PMs/producers continually feeds and maintains them. </div>
+                daily assigned tasks, fields & statuses, permissions, due dates, and general ongoing maintenance. 
+                In practice, that means they only remain true if a layer of PMs/producers continually and accurately feed them. </div>
                  <div>
-                The Bureau is an operating map, not a work tracker: It's a lightweight canvas where the core realities of a studio: people, projects, budgets, and time - can be arranged, connected, and reshaped in minutes to test a plan. </div>
-                <div>The point is immediacy and legibility: Founders, Directors, and Executives can open the canvas, intuitively prototype a new project mix or resourcing change, and see the implications without standing up day-to-day logistics tools, enforcing compliance, or translating their mental business model into someone else’s taxonomy.
+                The Bureau is an operating map, not a work tracker: It's a lightweight canvas where the core realities of running a studio: people, projects, budgets, debits, and time - can be arranged, connected, and reshaped in minutes to test out a plan. </div>
+                <div>The point is immediacy and legibility: Founders, Directors, and Executives can open the canvas, intuitively prototype a new project mix or resourcing change, and see the implications without breaking task workflows inside day-to-day logistics tools, or translating their mental business model into someone else’s taxonomy.
               </div>
               
             </div>
@@ -110,8 +110,8 @@ export default function InvestorOnePager() {
 
           <div className="mt-4 rounded-2xl border border-black/10 p-4">
             <div className="space-y-2 text-sm opacity-80">
-              <div>Studios are smaller, faster, more distributed, and run closer to the edge. Capacity errors compound into delivery risk and margin loss. 
-                The tolerance for error and misallocation is collapsing.</div>
+              <div>Studios are smaller, faster, globally distributed, and run closer to the edge. Capacity errors compound into delivery risk and margin loss. 
+                The tolerance for error and misallocation is collapsing quickly.</div>
               
             </div>
           </div>
@@ -140,8 +140,25 @@ export default function InvestorOnePager() {
           <div className="mt-4 rounded-2xl border border-black/10 p-4">
             <div className="space-y-2 text-sm opacity-80">
               <div>
-                The graph becomes the studio’s proprietary living operating model: customised project organisms, connected constraints, decision path comparisions, and historical
-                context. Over time, this enables derived views and AI reporting, without losing the underlying map.
+                The graph becomes the studio’s proprietary living operating model: customised node inputs connected to project organisms, surfaced constraints, decision path comparisions, and historical
+                achival-grade context. Over time, this enables derived views, and restrained AI reporting, without losing the underlying map of prototypes.
+              </div>
+              
+            </div>
+          </div>
+        </section>
+
+          {/* AI */}
+        <section className="mt-12">
+          <div className="text-xs uppercase tracking-wide opacity-50">Use of AI</div>
+
+          <div className="mt-4 rounded-2xl border border-black/10 p-4">
+            <div className="space-y-2 text-sm opacity-80">
+              <div>
+                AI inside The Bureau is deliberate, not theatrical. 
+                We’ll use LLMs only where they meaningfully reduce friction - under the hood, where the system benefits from interpretation, synthesis, and automation. 
+                There will be no personified 'assistant' parked on the canvas, no forced chat layer, and no attempt to replace your judgment and intimate knowledge of your own operation. 
+                The Bureau stays quiet: AI supports the mapping where it matters: cleaning inputs, surfacing inconsistencies, suggesting structure, and accelerating planning - without secretly manipulating core data, or becoming the interface.
               </div>
               
             </div>
@@ -154,8 +171,8 @@ export default function InvestorOnePager() {
             <div className="text-xs uppercase tracking-wide opacity-50">Ask</div>
             <div className="mt-3 space-y-2 text-sm opacity-80">
               <div>
-                Raising to reach paid pilots and harden the product for repeatable adoption. 
-                Looking for investors who understand operational software and creative/tech service business models.
+                Fundraising to reach paid pilots milestone, and harden the product for repeatable adoption post market launch in Q4, 2026. 
+                we are seeking investors who understand operational software and creative/tech service business models.
               </div>
              
             </div>

@@ -298,7 +298,7 @@ export default function LandingV2() {
                 <span className="font-medium">Test →</span> iterative models against reality.
               </div>
               <div>
-                <span className="font-medium">Commit →</span> move
+                <span className="font-medium">Commit →</span> and move
                 forward with clarity.
               </div>
             </div>
