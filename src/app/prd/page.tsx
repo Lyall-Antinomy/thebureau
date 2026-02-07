@@ -117,23 +117,7 @@ export default function InvestorOnePager() {
           </div>
         </section>
 
-        {/* Business Model */}
-        <section className="mt-12">
-          <div className="text-xs uppercase tracking-wide opacity-50">Business model</div>
-
-          <div className="mt-4 rounded-2xl border border-black/10 p-4">
-            <div className="space-y-2 text-sm opacity-80">
-              <div>
-                Perpetual workspace access pricing, with leadership seats and an employee contributor tier.
-                Opt-in annual version upgrades with benefits.
-              </div>
-              
-              <div>Private beta (Q2, 2026) → Paid pilots (Q3, 2026) → Broader market release (Q4, 2026)</div>
-            </div>
-          </div>
-        </section>
-
-        {/* Moat */}
+          {/* Moat */}
         <section className="mt-12">
           <div className="text-xs uppercase tracking-wide opacity-50">Moat</div>
 
@@ -144,6 +128,22 @@ export default function InvestorOnePager() {
                 achival-grade context. Over time, this enables derived views, and restrained AI reporting, without losing the underlying map of prototypes.
               </div>
               
+            </div>
+          </div>
+        </section>
+
+        {/* Pricing Model */}
+        <section className="mt-12">
+          <div className="text-xs uppercase tracking-wide opacity-50">Pricing model & releases</div>
+
+          <div className="mt-4 rounded-2xl border border-black/10 p-4">
+            <div className="space-y-2 text-sm opacity-80">
+              <div>
+                Perpetual workspace access pricing, with leadership seats and an employee contributor tier.
+                Opt-in annual version upgrades with benefits.
+              </div>
+              
+              <div>Private beta (Q2, 2026) → Paid pilots (Q3, 2026) → Broader market release (Q4, 2026)</div>
             </div>
           </div>
         </section>
@@ -172,7 +172,7 @@ export default function InvestorOnePager() {
             <div className="mt-3 space-y-2 text-sm opacity-80">
               <div>
                 Fundraising to reach paid pilots milestone, and harden the product for repeatable adoption post market launch in Q4, 2026. 
-                we are seeking investors who understand operational software and creative/tech service business models.
+                We are seeking investors who understand operational software and creative/tech service business models.
               </div>
              
             </div>
