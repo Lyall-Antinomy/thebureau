@@ -1,0 +1,169 @@
+'use client';
+
+const BUREAU_GREEN = '#007231';
+
+export default function InvestorOnePager() {
+  return (
+    <main className="h-screen overflow-y-auto bg-white text-black" style={{ WebkitOverflowScrolling: 'touch' }}>
+      <div className="mx-auto max-w-2xl px-6 py-24">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="text-lg font-semibold tracking-tight">The Bureau •</div>
+
+            <span
+              className="rounded-full border px-2 py-1 text-[11px] font-medium uppercase tracking-wide"
+              style={{
+                borderColor: 'rgba(0,114,49,0.25)',
+                color: 'rgba(0,114,49,0.85)',
+              }}
+            >
+              prd
+            </span>
+          </div>
+
+          <div className="text-sm">
+  <a
+    href="/"
+    className="opacity-60 hover:opacity-100 transition select-none"
+    style={{ color: BUREAU_GREEN }}
+    aria-label="Home"
+    title="Return to home"
+  >
+    Request access →
+  </a>
+</div>
+        </div>
+
+        {/* Hero */}
+        <h1 className="mt-14 text-4xl font-medium leading-tight tracking-tight">Product Requirements Document.</h1>
+
+        <div className="mt-6 space-y-3">
+          <p className="text-lg leading-relaxed opacity-80">People. Projects. Budgets. Time — Connected.</p>
+
+          <p className="text-base leading-relaxed opacity-80">
+            The Bureau is a visual operating layer for creative and technology studios. It connects resourcing, timelines, and commercial reality
+            into one living map so leaders can make critical decisions without app switching or hunting for data.
+          </p>
+
+          <p className="text-sm leading-relaxed opacity-70">
+            Not task tracking. Not compliant accounting. Instead, a real-time, high-level view of critical studio ops - in live convesation with iterative protoyping organisms. 
+            It surfaces risk and opportunity, and forces clarity on tradeoffs. 
+          </p>
+
+          <p className="text-sm leading-relaxed opacity-70">
+            The Bureau sees in months, quaters, years - not days. 
+          </p>
+        </div>
+
+        {/* The Problem */}
+        <section className="mt-12">
+          <div className="text-xs uppercase tracking-wide opacity-50">The problem</div>
+
+          <div className="mt-4 rounded-2xl border border-black/10 p-4">
+            <div className="space-y-2 text-sm opacity-80">
+              <div>Studio operations live in fragments: Bloated PM tools (granular task managers), permissioned finance tools (sensitive accounting), mind-numbing spreadsheets (poor UX), and complex studio databases (noisy).</div>
+              <div>Decisions slow down. Constraints get missed. Overload arrives late. Margin becomes guesswork. 
+                Critical reporting must be reconstructed from fragmented data across a suite of permissioned operational apps and software.</div>
+            </div>
+          </div>
+        </section>
+
+        {/* The Solution */}
+        <section className="mt-12">
+          <div className="text-xs uppercase tracking-wide opacity-50">The solution</div>
+
+          <div className="mt-4 rounded-2xl border border-black/10 p-4">
+            <div className="space-y-2 text-sm opacity-80">
+              <div>
+                A node-based operating map where instances of resources, projects, budgets, and timelines are visually wired together.
+                Prototype mutiple scenarios across the financial year by simply moving and connecting objects on a familiar canvas.
+              </div>
+              
+            </div>
+          </div>
+        </section>
+
+         {/* Strategic Comparison */}
+        <section className="mt-12">
+          <div className="text-xs uppercase tracking-wide opacity-50">Strategic Comparison</div>
+
+          <div className="mt-4 rounded-2xl border border-black/10 p-4">
+            <div className="space-y-2 text-sm opacity-80">
+              <div>
+                The Bureau isn’t trying to out-feature tools like Asana, Monday.com or Celoxis - it’s solving a different problem. 
+                Those platforms are powerful ops & analytic systems, but they get that power from a structure riddled with dependencies: 
+                daily task statuses, fields, permissions, and ongoing upkeep. 
+                In practice, that means they only remain true if a layer of PMs/producers continually feeds and maintains them. </div>
+                 <div>
+                The Bureau is an operating map, not a work tracker: It's a lightweight canvas where the core realities of a studio: people, projects, budgets, and time - can be arranged, connected, and reshaped in minutes to test a plan. </div>
+                <div>The point is immediacy and legibility: Founders, Directors, and Executives can open the canvas, intuitively prototype a new project mix or resourcing change, and see the implications without standing up day-to-day logistics tools, enforcing compliance, or translating their mental business model into someone else’s taxonomy.
+              </div>
+              
+            </div>
+          </div>
+        </section>
+
+        {/* Why Now */}
+        <section className="mt-12">
+          <div className="text-xs uppercase tracking-wide opacity-50">Why now</div>
+
+          <div className="mt-4 rounded-2xl border border-black/10 p-4">
+            <div className="space-y-2 text-sm opacity-80">
+              <div>Studios are smaller, faster, more distributed, and run closer to the edge. Capacity errors compound into delivery risk and margin loss. 
+                The tolerance for error and misallocation is collapsing.</div>
+              
+            </div>
+          </div>
+        </section>
+
+        {/* Business Model */}
+        <section className="mt-12">
+          <div className="text-xs uppercase tracking-wide opacity-50">Business model</div>
+
+          <div className="mt-4 rounded-2xl border border-black/10 p-4">
+            <div className="space-y-2 text-sm opacity-80">
+              <div>
+                Perpetual workspace access pricing, with leadership seats and an employee contributor tier.
+                Opt-in annual version upgrades with benefits.
+              </div>
+              
+              <div>Private beta (Q2, 2026) → Paid pilots (Q3, 2026) → Broader market release (Q4, 2026)</div>
+            </div>
+          </div>
+        </section>
+
+        {/* Moat */}
+        <section className="mt-12">
+          <div className="text-xs uppercase tracking-wide opacity-50">Moat</div>
+
+          <div className="mt-4 rounded-2xl border border-black/10 p-4">
+            <div className="space-y-2 text-sm opacity-80">
+              <div>
+                The graph becomes the studio’s proprietary living operating model: customised project organisms, connected constraints, decision path comparisions, and historical
+                context. Over time, this enables derived views and AI reporting, without losing the underlying map.
+              </div>
+              
+            </div>
+          </div>
+        </section>
+
+        {/* Ask */}
+        <section className="mt-12">
+          <div className="rounded-2xl border p-4" style={{ borderColor: 'rgba(0,114,49,0.25)' }}>
+            <div className="text-xs uppercase tracking-wide opacity-50">Ask</div>
+            <div className="mt-3 space-y-2 text-sm opacity-80">
+              <div>
+                Raising to reach paid pilots and harden the product for repeatable adoption. 
+                Looking for investors who understand operational software and creative/tech service business models.
+              </div>
+             
+            </div>
+          </div>
+        </section>
+
+        <div className="mt-16 text-xs opacity-50">© {new Date().getFullYear()} The Bureau</div>
+      </div>
+    </main>
+  );
+}

@@ -71,17 +71,18 @@ export default function LandingV2() {
             </span>
           </div>
 
-          {/* Right: open app */}
-          <div className="text-sm">
-            <span
-              className="opacity-60 hover:opacity-100 transition cursor-default select-none"
-              style={{ color: BUREAU_GREEN }}
-              aria-label="Open app (coming soon)"
-              title="Coming soon"
-            >
-              Open app →
-            </span>
-          </div>
+          {/* Right: PRD */}
+<div className="text-sm">
+  <a
+    href="/prd"
+    className="opacity-60 hover:opacity-100 transition select-none"
+    style={{ color: BUREAU_GREEN }}
+    aria-label="Open PRD"
+    title="Open PRD"
+  >
+    Read the PRD →
+  </a>
+</div>
         </div>
 
         {/* Hero */}
@@ -95,7 +96,7 @@ export default function LandingV2() {
           </p>
 
           <p className="text-base leading-relaxed opacity-80">
-            The Bureau is where you prototype operations visually. Iterate on staffing, budget shape, 
+            The Bureau is where you prototype studio operations visually. Iterate on staffing, budget shape, 
             timelines, and change-scenarios by simply connecting the dots across the financial year.
           </p>
 
@@ -178,7 +179,7 @@ export default function LandingV2() {
 
           <div className="mt-4 space-y-2 text-sm opacity-80">
             <div>Unlimited desktop access</div>
-            <div>Mobile Executive view</div>
+            <div>Mobile executive dashboard</div>
             <div>12 months of product updates</div>
             <div>Dedicated support</div>
           </div>
@@ -201,9 +202,8 @@ export default function LandingV2() {
 
         <div className="mt-4 space-y-2 text-sm opacity-80">
           <div>Mobile-only</div>
-          <div>Assigned projects</div>
-          <div>Work session timer</div>
-          <div>Feeds data back into the system</div>
+          <div>Project work session timer</div>
+          <div>Returns compiled data to the executive dashboard</div>
         </div>
 
         <div className="mt-4 text-sm">
@@ -256,16 +256,16 @@ export default function LandingV2() {
                   {[
                     ['Operations prototyping canvas', '✅', '❌'],
                     ['Critical data visualisation views', '✅', '❌'],
-                    ['Budgets & financial rollups', '✅', '❌'],
-                    ['Contractor negotiation tools', '✅', '❌'],
+                    ['Detailed Budgets', '✅', '❌'],
+                    ['Ledger & financial analytics', '✅', '❌'],
+                    ['Contractor fee negotiation tools', '✅', '❌'],
                     [
-                      'Live resourcing & capacity planning',
+                      'Resourcing & capacity planning',
                       '✅',
                       '❌',
                     ],
                     ['Mobile executive dashboard', '✅', '❌'],
-                    ['Mobile project list', '✅', '✅'],
-                    ['Mobile time stamping', '✅', '✅'],
+                    ['Mobile project time stamping', '✅', '✅'],
                     ['Audit trail for sensitive changes', '✅', '❌'],
                   ].map(([cap, core, contrib]) => (
                     <tr key={cap} className="border-t border-black/5">
