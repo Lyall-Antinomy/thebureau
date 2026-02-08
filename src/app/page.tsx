@@ -175,18 +175,18 @@ export default function LandingV2() {
           {/* Treat this like "Contributors 25" */}
           <div className="text-sm font-medium">Leadership</div>
           <div className="mt-1 text-2xl font-medium tracking-tight">10</div>
-          <div className="mt-1 text-xs opacity-60">Executive seats Included</div>
+          <div className="mt-1 text-xs opacity-60">Leadership seats included</div>
 
           <div className="mt-4 space-y-2 text-sm opacity-80">
-            <div>Unlimited desktop access</div>
-            <div>Mobile executive dashboard</div>
+            <div>Unlimited desktop app access</div>
+            <div>Mobile leadership reports dashboard</div>
             <div>12 months of product updates</div>
             <div>Dedicated support</div>
           </div>
           <div className="mt-4 text-sm">
           <span className="opacity-60">Scale:</span>{' '}
           <span className="font-medium">€12 / month</span>{' '}
-          <span className="opacity-60">per additional 5 contributors</span>
+          <span className="opacity-60">per additional 5 leaders</span>
         </div>
         </div>
       </div>
@@ -198,12 +198,12 @@ export default function LandingV2() {
       <div>
         <div className="text-sm font-medium">Contributors</div>
         <div className="mt-1 text-2xl font-medium tracking-tight">25</div>
-        <div className="mt-1 text-xs opacity-60">Employee seats Included</div>
+        <div className="mt-1 text-xs opacity-60">Employee seats included</div>
 
         <div className="mt-4 space-y-2 text-sm opacity-80">
           <div>Mobile-only</div>
           <div>Project work session timer</div>
-          <div>Returns compiled data to the executive dashboard</div>
+          <div>Returns compiled data to system</div>
         </div>
 
         <div className="mt-4 text-sm">
@@ -240,7 +240,7 @@ export default function LandingV2() {
 
           <div className="mt-4 rounded-2xl border border-black/10 p-4">
             <div className="text-sm opacity-70">
-              Two roles. Clear boundaries. Designed for studios.
+              Two roles. Clear boundaries. 
             </div>
 
             <div className="mt-4 overflow-x-auto">
@@ -264,8 +264,8 @@ export default function LandingV2() {
                       '✅',
                       '❌',
                     ],
-                    ['Mobile executive dashboard', '✅', '❌'],
-                    ['Mobile project time stamping', '✅', '✅'],
+                    ['Mobile leadership reports dashboard', '✅', '❌'],
+                    ['Mobile contributor project time stamping', '✅', '✅'],
                     ['Audit trail for sensitive changes', '✅', '❌'],
                   ].map(([cap, core, contrib]) => (
                     <tr key={cap} className="border-t border-black/5">

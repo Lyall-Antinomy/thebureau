@@ -91,13 +91,13 @@ export default function InvestorOnePager() {
           <div className="mt-4 rounded-2xl border border-black/10 p-4">
             <div className="space-y-2 text-sm opacity-80">
               <div>
-                The Bureau isn’t trying to out-feature tools like Asana, Monday, Linear, Notion, Jira, or Celoxis - it’s solving a different problem. 
+                The Bureau isn’t trying to out-feature existing productivity tools like Asana, Monday, Linear, Notion, Jira, or Celoxis - it’s solving a different problem. 
                 Those platforms are powerful ops & analytic systems, but they get that power from a structure riddled with dependencies: 
-                daily assigned tasks, fields & statuses, permissions, due dates, and general ongoing maintenance. 
-                In practice, that means they only remain true if a layer of PMs/producers continually and accurately feed them. </div>
+                daily assigned tasks, fields & statuses, permissions, due dates, and general ongoing project manager maintenance. 
+                </div>
                  <div>
                 The Bureau is an operating map, not a work tracker: It's a lightweight canvas where the core realities of running a studio: people, projects, budgets, debits, and time - can be arranged, connected, and reshaped in minutes to test out a plan. </div>
-                <div>The point is immediacy and legibility: Founders, Directors, and Executives can open the canvas, intuitively prototype a new project mix or resourcing change, and see the implications without breaking task workflows inside day-to-day logistics tools, or translating their mental business model into someone else’s taxonomy.
+                <div>The point is immediacy and legibility: Founders, Directors, and Executives can open the canvas, intuitively prototype a new project mix or resourcing change, and see the implications without breaking task workflows inside existing core logistics tools, or translating their mental business model into someone else’s taxonomy.
               </div>
               
             </div>

@@ -23,6 +23,7 @@ import 'reactflow/dist/style.css';
 import { nanoid } from 'nanoid';
 import { create } from 'zustand';
 import MasterTimeline from '../MasterTimeline';
+import * as Select from '@radix-ui/react-select';
 /**
  * -------------------------
  * Types
@@ -1859,14 +1860,18 @@ function BureauToggle({
       aria-pressed={on}
       title={label ?? (on ? 'Collapse' : 'Expand')}
       style={{
+        // ✅ keep behavior + layout, but REMOVE the outer “capsule”
         display: 'inline-flex',
         alignItems: 'center',
         gap: 10,
-        padding: '6px 10px',
-        borderRadius: 999,
-        border: '1px solid rgba(0,0,0,0.10)',
-        background: 'rgba(255,255,255,0.92)',
-        boxShadow: '0 6px 16px rgba(0,0,0,0.06)',
+
+        // ✅ no padding/background/border/shadow around the toggle
+        padding: 0,
+        borderRadius: 0,
+        border: 'none',
+        background: 'transparent',
+        boxShadow: 'none',
+
         cursor: 'pointer',
         userSelect: 'none',
       }}
@@ -2326,7 +2331,6 @@ function BudgetNode({ id, data, selected }: NodeProps<GraphNodeData>) {
       {dock?.bottom && <DockClip side="bottom" />}
 
       <Handle type="target" position={Position.Left} id="budget-in" style={tinyPort()} />
-      <Handle type="source" position={Position.Right} id="budget-out" style={tinyPort()} />
 
       <div style={{ fontWeight: 650, fontSize: 13 }}>{data.title}</div>
 
@@ -2461,12 +2465,7 @@ function TimelineNode({ data, selected }: NodeProps<GraphNodeData>) {
       {dock?.bottom && <DockClip side="bottom" />}
 
       <Handle type="target" position={Position.Left} id="timeline-in" style={tinyPort()} />
-      <Handle
-        type="target"
-        position={Position.Bottom}
-        id="resource-in"
-        style={{ ...tinyPort(), left: '70%' }}
-      />
+      
 
       <div style={{ fontWeight: 650, fontSize: 13 }}>{data.title}</div>
       <div style={{ fontSize: 11, opacity: 0.65 }}>
@@ -2774,7 +2773,7 @@ const btnStyle: React.CSSProperties = {
   border: '1px solid rgba(0,0,0,0.06)',
   background: BUREAU_GREEN,
   color: 'white',
-  fontWeight: 700,
+  fontWeight: 350,
   fontSize: 12,
   lineHeight: 1,
   height: 40,                 // keeps alignment clean
@@ -2789,8 +2788,39 @@ const btnStyle: React.CSSProperties = {
 const btnActiveStyle: React.CSSProperties = {
   ...btnStyle,
   background: BUREAU_GREEN_DARK,
-  border: '1px solid rgba(0,0,0,0.10)',
+  border: '0.75px solid rgba(0,0,0,0.10)',
 };
+
+const pillBtn: React.CSSProperties = {
+  height: 30, // keep your BTN_H if you want
+  padding: '0 14px',
+  borderRadius: 999,
+  border: '0.75px solid rgba(0,114,49,0.85)',
+  background: 'rgba(0,90,39,0.08)',
+  color: BUREAU_GREEN,
+  fontSize: 13,
+  fontWeight: 350,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  lineHeight: 1,
+  cursor: 'pointer',
+  userSelect: 'none',
+  transition: 'background 120ms ease, border-color 120ms ease, transform 120ms ease',
+};
+
+const pillBtnActive: React.CSSProperties = {
+  ...pillBtn,
+  border: '0.75px solid rgba(0,114,49,0.85)',
+  background: 'rgba(0,90,39,0.14)',
+};
+
+const pillBtnHover: React.CSSProperties = {
+  background: 'rgba(0,90,39,0.12)',
+  borderColor: 'rgba(0,90,39,0.5)',
+};
+
+
 
 const dividerStyle: React.CSSProperties = {
   width: 1,
@@ -2822,6 +2852,8 @@ export default function Home() {
 
   const inspectorCollapsed = useGraph((s) => s.inspectorCollapsed);
   const toggleInspectorCollapsed = useGraph((s) => s.toggleInspectorCollapsed);
+
+  const [hoveredTop, setHoveredTop] = useState<'workflow' | 'timeline' | null>(null);
 
   // Selection ids (declare ONCE)
   const selectedNodeId = useGraph((s) => s.selectedNodeId);
@@ -2870,7 +2902,7 @@ const [snapInspector, setSnapInspector] = useState(false);
 const snapInspectorRef = useRef(false);
 
 // Tuning
-const INSPECTOR_MIN = 52;          // collapsed header-only target
+const INSPECTOR_MIN = 50;          // collapsed header-only target
 const INSPECTOR_MIN_EXPANDED = 180; // when a node/edge is selected
 const INSPECTOR_BASELINE = 50;      // expanded, NO selection (edit this)
 
@@ -3381,114 +3413,241 @@ const masterTimelineItems = useMemo(() => {
 
   return (
     <div style={{ width: '100vw', height: '100vh' }}>
-      {/* Toolbar */}
-<div
+      {/* TOOLBARS (Top / Left / Bottom) */}
+<>
+  {/* TOP: Views only */}
+  <div
   style={{
     position: 'absolute',
     zIndex: 10,
-    top: 12,
+    top: 32,
     left: '50%',
     transform: 'translateX(-50%)',
-    display: 'flex',
+    display: 'inline-flex',          // ✅ hug contents
     alignItems: 'center',
     gap: 10,
     background: 'rgba(255,255,255,0.92)',
     padding: 10,
-    borderRadius: 18,
+    borderRadius: 25,
     border: '1px solid rgba(0,0,0,0.08)',
     boxShadow: '0 14px 30px rgba(0,0,0,0.08)',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    maxWidth: 1040,
-    width: 'calc(100vw - 24px)',
+    flexWrap: 'nowrap',              // ✅ keep as one row
+    justifyContent: 'flex-start',     // ✅ no internal centering needed
+    width: 'fit-content',             // ✅ snug
     backdropFilter: 'blur(6px)',
   }}
 >
-  {/* View */}
-  <button
-    onClick={() => setViewMode('workflow')}
-    style={{
-      ...btnStyle,
-      background: viewMode === 'workflow' ? '#005a27' : '#007231',
-      color: 'white',
-    }}
-  >
-    Workflow
-  </button>
 
-  <button
-    onClick={() => setViewMode('timeline')}
-    style={{
-      ...btnStyle,
-      background: viewMode === 'timeline' ? '#005a27' : '#007231',
-      color: 'white',
-    }}
-  >
-    Timeline
-  </button>
 
-  <div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
 
-  {/* Connection type */}
+    <button
+  onClick={() => setViewMode('workflow')}
+  onMouseEnter={() => setHoveredTop('workflow')}
+  onMouseLeave={() => setHoveredTop(null)}
+  style={{
+    ...pillBtn,
+    borderRadius: 999,
+    border: '0.75px solid rgba(0,114,49,0.85)',
+
+    background:
+      viewMode === 'workflow'
+        ? '#005a27'
+        : hoveredTop === 'workflow'
+        ? '#007231'
+        : 'rgba(255,255,255,0.92)',
+
+    color:
+      viewMode === 'workflow' || hoveredTop === 'workflow'
+        ? 'white'
+        : 'rgba(0,114,49,0.85)',
+  }}
+>
+  Workflow
+</button>
+
+<button
+  onClick={() => setViewMode('timeline')}
+  onMouseEnter={() => setHoveredTop('timeline')}
+  onMouseLeave={() => setHoveredTop(null)}
+  style={{
+    ...pillBtn,
+    borderRadius: 999,
+    border: '0.75px solid rgba(0,114,49,0.85)',
+
+    background:
+      viewMode === 'timeline'
+        ? '#005a27'
+        : hoveredTop === 'timeline'
+        ? '#007231'
+        : 'rgba(255,255,255,0.92)',
+
+    color:
+      viewMode === 'timeline' || hoveredTop === 'timeline'
+        ? 'white'
+        : 'rgba(0,114,49,0.85)',
+  }}
+>
+  Reports
+</button>
+
+    
+  </div>
+
+  {/* LEFT: Edge + Save/I-O/Reset (vertical stack) */}
+<div
+  style={{
+    position: 'absolute',
+    zIndex: 10,
+    top: '50%',
+    left: 32,
+    transform: 'translateY(-50%)',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 10,
+    background: 'rgba(255,255,255,0.92)',
+    padding: 10,
+    borderRadius: 25,
+    border: '1px solid rgba(0,0,0,0.08)',
+    boxShadow: '0 14px 30px rgba(0,0,0,0.08)',
+    backdropFilter: 'blur(6px)',
+    width: 90,
+  }}
+>
+  {/* Radius (ACTIVE state applies here) */}
   <button
     onClick={() => setEdgeMode('radius')}
+    onPointerEnter={(e) => {
+      // hover = bureau green w/ white text (only if NOT active)
+      if (edgeMode !== 'radius') {
+        const el = e.currentTarget as HTMLButtonElement;
+        el.style.background = '#007231';
+        el.style.color = 'white';
+        el.style.borderColor = '#007231';
+      }
+    }}
+    onPointerLeave={(e) => {
+      const el = e.currentTarget as HTMLButtonElement;
+      const active = edgeMode === 'radius';
+      el.style.background = active ? '#005a27' : 'white';
+      el.style.color = active ? 'white' : 'rgba(0,114,49,0.85)';
+      el.style.borderColor = 'rgba(0,114,49,0.85)';
+    }}
     style={{
-      ...btnStyle,
-      background: edgeMode === 'radius' ? '#005a27' : '#007231',
-      color: 'white',
+      ...pillBtn,
+      width: '100%',
+      background: edgeMode === 'radius' ? '#005a27' : 'white',
+      color: edgeMode === 'radius' ? 'white' : 'rgba(0,114,49,0.85)',
+      border: '0.75px solid rgba(0,114,49,0.85)',
     }}
   >
     Radius
   </button>
 
+  {/* Bezier (ACTIVE state applies here) */}
   <button
     onClick={() => setEdgeMode('bezier')}
+    onPointerEnter={(e) => {
+      if (edgeMode !== 'bezier') {
+        const el = e.currentTarget as HTMLButtonElement;
+        el.style.background = '#007231';
+        el.style.color = 'white';
+        el.style.borderColor = '#007231';
+      }
+    }}
+    onPointerLeave={(e) => {
+      const el = e.currentTarget as HTMLButtonElement;
+      const active = edgeMode === 'bezier';
+      el.style.background = active ? '#005a27' : 'white';
+      el.style.color = active ? 'white' : 'rgba(0,114,49,0.85)';
+      el.style.borderColor = 'rgba(0,114,49,0.85)';
+    }}
     style={{
-      ...btnStyle,
-      background: edgeMode === 'bezier' ? '#005a27' : '#007231',
-      color: 'white',
+      ...pillBtn,
+      width: '100%',
+      background: edgeMode === 'bezier' ? '#005a27' : 'white',
+      color: edgeMode === 'bezier' ? 'white' : 'rgba(0,114,49,0.85)',
+      border: '0.75px solid rgba(0,114,49,0.85)',
     }}
   >
     Bezier
   </button>
 
-  <div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
+  <div style={{ height: 1, width: '100%', background: 'rgba(0,0,0,0.08)', margin: '2px 0' }} />
 
-  {/* Add nodes */}
-  <button onClick={addPerson} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
-    + Resource
-  </button>
-
-  <button onClick={addProject} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
-    + Project
-  </button>
-
-  <button onClick={addBudget} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
-    + Budget
-  </button>
-
-  <button onClick={addTimeline} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
-    + Timeline
-  </button>
-
-  <div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
-
-  <button onClick={addLedger} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
-    + Ledger
-  </button>
-
-  <div style={{ width: 1, height: 40, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }} />
-
-  {/* Save / I/O */}
-  <button onClick={manualSave} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+  {/* Save (no active state, just hover) */}
+  <button
+    onClick={manualSave}
+    onPointerEnter={(e) => {
+      const el = e.currentTarget as HTMLButtonElement;
+      el.style.background = '#007231';
+      el.style.color = 'white';
+      el.style.borderColor = '#007231';
+    }}
+    onPointerLeave={(e) => {
+      const el = e.currentTarget as HTMLButtonElement;
+      el.style.background = 'white';
+      el.style.color = 'rgba(0,114,49,0.85)';
+      el.style.borderColor = 'rgba(0,114,49,0.85)';
+    }}
+    style={{
+      ...pillBtn,
+      width: '100%',
+      background: 'white',
+      color: 'rgba(0,114,49,0.85)',
+      border: '0.75px solid rgba(0,114,49,0.85)',
+    }}
+  >
     Save
   </button>
 
-  <button onClick={exportJSON} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+  <button
+    onClick={exportJSON}
+    onPointerEnter={(e) => {
+      const el = e.currentTarget as HTMLButtonElement;
+      el.style.background = '#007231';
+      el.style.color = 'white';
+      el.style.borderColor = '#007231';
+    }}
+    onPointerLeave={(e) => {
+      const el = e.currentTarget as HTMLButtonElement;
+      el.style.background = 'white';
+      el.style.color = 'rgba(0,114,49,0.85)';
+      el.style.borderColor = 'rgba(0,114,49,0.85)';
+    }}
+    style={{
+      ...pillBtn,
+      width: '100%',
+      background: 'white',
+      color: 'rgba(0,114,49,0.85)',
+      border: '0.75px solid rgba(0,114,49,0.85)',
+    }}
+  >
     Export
   </button>
 
-  <button onClick={importJSON} style={{ ...btnStyle, background: '#007231', color: 'white' }}>
+  <button
+    onClick={importJSON}
+    onPointerEnter={(e) => {
+      const el = e.currentTarget as HTMLButtonElement;
+      el.style.background = '#007231';
+      el.style.color = 'white';
+      el.style.borderColor = '#007231';
+    }}
+    onPointerLeave={(e) => {
+      const el = e.currentTarget as HTMLButtonElement;
+      el.style.background = 'white';
+      el.style.color = 'rgba(0,114,49,0.85)';
+      el.style.borderColor = 'rgba(0,114,49,0.85)';
+    }}
+    style={{
+      ...pillBtn,
+      width: '100%',
+      background: 'white',
+      color: 'rgba(0,114,49,0.85)',
+      border: '0.75px solid rgba(0,114,49,0.85)',
+    }}
+  >
     Import
   </button>
 
@@ -3499,24 +3658,111 @@ const masterTimelineItems = useMemo(() => {
         resetGraph();
       }
     }}
-    style={{ ...btnStyle, background: '#007231', color: 'white', opacity: 0.9 }}
+    onPointerEnter={(e) => {
+      const el = e.currentTarget as HTMLButtonElement;
+      el.style.background = '#007231';
+      el.style.color = 'white';
+      el.style.borderColor = '#007231';
+      el.style.opacity = '1';
+    }}
+    onPointerLeave={(e) => {
+      const el = e.currentTarget as HTMLButtonElement;
+      el.style.background = 'white';
+      el.style.color = 'rgba(0,114,49,0.85)';
+      el.style.borderColor = 'rgba(0,114,49,0.85)';
+      el.style.opacity = '0.9';
+    }}
+    style={{
+      ...pillBtn,
+      width: '100%',
+      background: 'white',
+      color: 'rgba(0,114,49,0.85)',
+      border: '0.75px solid rgba(0,114,49,0.85)',
+      opacity: 0.9,
+    }}
   >
     Reset
   </button>
 </div>
+
+  {/* BOTTOM: Add nodes only (replaces scrubber space) */}
+<div
+  style={{
+    position: 'absolute',
+    zIndex: 10,
+    bottom: 32,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 10,
+    background: 'rgba(255,255,255,0.92)',
+    padding: 10,
+    borderRadius: 25,
+    border: '0.75px solid rgba(0,0,0,0.08)',
+    boxShadow: '0 14px 30px rgba(0,0,0,0.08)',
+    flexWrap: 'nowrap',
+    justifyContent: 'flex-start',
+    width: 'fit-content',
+    backdropFilter: 'blur(6px)',
+  }}
+>
+  {(() => {
+    const STROKE = 'rgba(0,114,49,0.85)';
+    const HOVER_BG = '#007231';
+
+    const ActionPill = ({
+      label,
+      onClick,
+    }: {
+      label: string;
+      onClick: () => void;
+    }) => {
+      const [hover, setHover] = useState(false);
+
+      return (
+        <button
+          onClick={onClick}
+          onMouseEnter={() => setHover(true)}
+          onMouseLeave={() => setHover(false)}
+          style={{
+            ...pillBtn,
+            borderColor: STROKE,
+            color: hover ? 'white' : STROKE,
+            background: hover ? HOVER_BG : 'white',
+            transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
+          }}
+        >
+          {label}
+        </button>
+      );
+    };
+
+    return (
+      <>
+        <ActionPill label="+ Resource" onClick={addPerson} />
+        <ActionPill label="+ Project" onClick={addProject} />
+        <ActionPill label="+ Budget" onClick={addBudget} />
+        <ActionPill label="+ Timeline" onClick={addTimeline} />
+        <ActionPill label="+ Ledger" onClick={addLedger} />
+      </>
+    );
+  })()}
+</div>
+</>
 {/* Inspector */}
 <div
   ref={inspectorWrapRef}
   style={{
     position: 'absolute',
     zIndex: 10,
-    right: 12,
+    right: 32,
 
     // always vertically centered on the right rail
     top: '50%',
     transform: 'translateY(-50%)',
 
-    width: 380, // constant width
+    width: 300, // constant width
 
     // vertical collapse/expand
     height: inspectorCollapsed ? INSPECTOR_MIN : inspectorHeight,
@@ -3525,8 +3771,8 @@ const masterTimelineItems = useMemo(() => {
     overflow: 'hidden',
 
     background: 'rgba(255,255,255,0.92)',
-    padding: 12,
-    borderRadius: 18,
+    padding: 15,
+    borderRadius: 10,
     border: '1px solid rgba(0,0,0,0.08)',
     boxShadow: '0 14px 30px rgba(0,0,0,0.08)',
     backdropFilter: 'blur(6px)',
@@ -3549,7 +3795,7 @@ const masterTimelineItems = useMemo(() => {
     }}
   >
     <div style={{ minWidth: 0 }}>
-      <div style={{ fontWeight: 800, fontSize: 13, lineHeight: 1.1 }}>Inspector</div>
+      <div style={{ fontWeight: 500, fontSize: 13, lineHeight: 1.1 }}>Inspector</div>
       {!inspectorCollapsed && (
         <div style={{ opacity: 0.6, fontSize: 12, marginTop: 2 }}>
           Click a node or connection to edit it.
@@ -3572,9 +3818,7 @@ const masterTimelineItems = useMemo(() => {
         padding: 8,
       }}
     >
-      <div style={{ fontSize: 11, opacity: 0.55, fontFamily: 'var(--font-mono)' }}>
-        Cmd+\ to open
-      </div>
+     
     </div>
   ) : (
     <div
@@ -3585,7 +3829,7 @@ const masterTimelineItems = useMemo(() => {
     flex: inspectorAtMax ? 1 : '0 0 auto',
     overflowY: inspectorAtMax ? 'auto' : 'visible',
     overflowX: 'hidden',
-    paddingBottom: 12,
+    paddingBottom: 15,
     paddingRight: 2,
 
         // ✅ hide scrollbar chrome (Firefox/IE/Edge legacy)
@@ -3730,25 +3974,187 @@ const masterTimelineItems = useMemo(() => {
 
           {(selectedNode.data as any).kind === 'project' && (
             <>
-              <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700, opacity: 0.8 }}>PROJECT Node</div>
+              
 
               <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Studio</div>
-              <select
-                value={((selectedNode.data as ProjectData).studio ?? 'Antinomy Studio') as any}
-                onChange={(e) => updateProjectStudio(selectedNode.id, e.target.value as Studio)}
-                style={{
-                  marginTop: 6,
-                  width: '100%',
-                  padding: '10px 12px',
-                  borderRadius: 12,
-                  border: '1px solid rgba(0,0,0,0.10)',
-                  background: 'white',
-                  fontSize: 13,
-                }}
-              >
-                <option value="Antinomy Studio">Antinomy Studio</option>
-                <option value="27b">27b</option>
-              </select>
+              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Studio</div>
+
+<Select.Root
+  value={String(((selectedNode.data as ProjectData).studio ?? 'Antinomy Studio') as any)}
+  onValueChange={(v: string) => updateProjectStudio(selectedNode.id, v as Studio)}
+>
+  <Select.Trigger
+    aria-label="Studio"
+    style={{
+      marginTop: 6,
+      width: '100%',
+      padding: '10px 12px',
+      borderRadius: 12,
+      border: '1px solid rgba(0,0,0,0.10)',
+      background: 'white',
+      fontSize: 13,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      lineHeight: 1.2,
+      cursor: 'pointer',
+
+      // ✅ safe zone for chevron
+      paddingRight: 16,
+    }}
+  >
+    <Select.Value />
+
+    <Select.Icon
+      style={{
+        width: 18,
+        height: 18,
+        display: 'grid',
+        placeItems: 'center',
+        opacity: 0.65,
+        flex: '0 0 auto',
+        marginRight: 2,
+      }}
+    >
+      <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true">
+        <path
+          d="M5 7l5 6 5-6"
+          fill="none"
+          stroke="rgba(0,0,0,0.55)"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </Select.Icon>
+  </Select.Trigger>
+
+  <Select.Portal>
+    <Select.Content
+      position="popper"
+      sideOffset={6}
+      style={{
+        zIndex: 9999,
+        background: 'rgba(255,255,255,0.98)',
+        borderRadius: 12,
+        border: '1px solid rgba(0,0,0,0.10)',
+        boxShadow: '0 14px 30px rgba(0,0,0,0.12)',
+        overflow: 'hidden',
+        backdropFilter: 'blur(8px)',
+        minWidth: 260,
+      }}
+    >
+      <Select.Viewport style={{ padding: 6 }}>
+        <Select.Item
+          value="Antinomy Studio"
+          style={{
+            fontSize: 13,
+            padding: '10px 12px',
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
+            cursor: 'pointer',
+            outline: 'none',
+            userSelect: 'none',
+          }}
+        >
+          <Select.ItemText>Antinomy Studio</Select.ItemText>
+
+          <Select.ItemIndicator
+            style={{
+              width: 18,
+              height: 18,
+              display: 'grid',
+              placeItems: 'center',
+              opacity: 0.95,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true">
+              <path
+                d="M4 10.5l3.2 3.2L16 5.8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </Select.ItemIndicator>
+        </Select.Item>
+
+        <Select.Item
+          value="27b"
+          style={{
+            fontSize: 13,
+            padding: '10px 12px',
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
+            cursor: 'pointer',
+            outline: 'none',
+            userSelect: 'none',
+          }}
+        >
+          <Select.ItemText>27b</Select.ItemText>
+
+          <Select.ItemIndicator
+            style={{
+              width: 18,
+              height: 18,
+              display: 'grid',
+              placeItems: 'center',
+              opacity: 0.95,
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true">
+              <path
+                d="M4 10.5l3.2 3.2L16 5.8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </Select.ItemIndicator>
+        </Select.Item>
+      </Select.Viewport>
+
+      {/* ✅ IMPORTANT: Radix Select items do NOT use [data-radix-select-item].
+          They use data-radix-collection-item + data-highlighted + data-state="checked".
+          Target the actual nodes by role="option". */}
+      <style jsx>{`
+        :global([role='option']) {
+          background: transparent;
+          color: rgba(0, 0, 0, 0.85);
+        }
+
+        /* Hover / keyboard highlight */
+        :global([role='option'][data-highlighted]) {
+          background: rgba(0, 114, 49, 0.12);
+          color: rgba(0, 0, 0, 0.92);
+        }
+
+        /* Selected row (your ask: bureau green selection) */
+        :global([role='option'][data-state='checked']) {
+          background: #007231;
+          color: white;
+        }
+
+        /* Selected + highlighted (darker) */
+        :global([role='option'][data-state='checked'][data-highlighted]) {
+          background: #005a27;
+          color: white;
+        }
+      `}</style>
+    </Select.Content>
+  </Select.Portal>
+</Select.Root>
 
               <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Client</div>
               <input
@@ -3805,7 +4211,7 @@ const masterTimelineItems = useMemo(() => {
               <div
                 style={{
                   marginTop: 10,
-                  padding: 10,
+                  padding: 15,
                   borderRadius: 12,
                   background: 'rgba(0,0,0,0.03)',
                   border: '1px solid rgba(0,0,0,0.08)',
@@ -3880,19 +4286,7 @@ const masterTimelineItems = useMemo(() => {
     </div>
   )}
 
-  <style jsx>{`
-    .inspectorBody::-webkit-scrollbar {
-      width: 0 !important;
-      height: 0 !important;
-      display: none !important;
-    }
-    .inspectorBody::-webkit-scrollbar-thumb {
-      background: transparent !important;
-    }
-    .inspectorBody::-webkit-scrollbar-track {
-      background: transparent !important;
-    }
-  `}</style>
+  
 </div>
 
 
@@ -3912,14 +4306,15 @@ const masterTimelineItems = useMemo(() => {
     userSelect: 'none',
   }}
 >
-  <div style={{ fontSize: 26, fontWeight: 800, opacity: 0.75, letterSpacing: -0.9 }}>
-    The Bureau •
-  </div>
-  <div style={{ fontSize: 16, opacity: 0.4 }}>Prototype Business Reality</div>
+  <div style={{ fontSize: 26, fontWeight: 800, opacity: 0.95, letterSpacing: -0.9 }}>
+  The Bureau <span style={{ color: BUREAU_GREEN, opacity: 1 }}>•</span>
+</div>
+<div style={{ fontSize: 14, opacity: 0.4 }}>Prototype Business Reality</div>
 </div>
 {/* Timeline Scrubber (Workflow view) */}
 {/* Time Scrubber */}
 <div
+  aria-hidden
   style={{
     position: 'absolute',
     left: '50%',
@@ -3937,14 +4332,17 @@ const masterTimelineItems = useMemo(() => {
     display: 'flex',
     alignItems: 'center',
     gap: 14,
+
+    /* ✅ hide without unmounting */
+    opacity: 0,
+    pointerEvents: 'none',
+    visibility: 'hidden',
   }}
 >
   {/* Left meta */}
   <div style={{ minWidth: 120 }}>
     <div style={{ fontSize: 12, fontWeight: 600 }}>FY · Week {scrubWeek + 1}</div>
-    <div style={{ fontSize: 11, opacity: 0.65 }}>
-     {mounted ? fmtShort(scrubDate) : ''}
-    </div>
+    <div style={{ fontSize: 11, opacity: 0.65 }}>{mounted ? fmtShort(scrubDate) : ''}</div>
   </div>
 
   {/* Ruler + slider */}
@@ -3979,12 +4377,12 @@ const masterTimelineItems = useMemo(() => {
   {/* Today button */}
   <button
     onClick={() => {
-  const now = new Date();
-  const diffMs = now.getTime() - FY_START.getTime();
-  const diffDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
-  const w = Math.min(TOTAL_WEEKS - 1, Math.floor(diffDays / 7));
-  setScrubWeek(w);
-}}
+      const now = new Date();
+      const diffMs = now.getTime() - FY_START.getTime();
+      const diffDays = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+      const w = Math.min(TOTAL_WEEKS - 1, Math.floor(diffDays / 7));
+      setScrubWeek(w);
+    }}
     style={{
       padding: '8px 10px',
       borderRadius: 12,
@@ -4005,37 +4403,37 @@ const masterTimelineItems = useMemo(() => {
   style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}
   
 >
- <ReactFlow
+<ReactFlow
   nodes={displayNodes}
   edges={edges}
   nodeTypes={nodeTypes}
   onConnect={onConnect}
   onNodesChange={onNodesChange}
   onEdgesChange={onEdgesChange}
-  onNodeClick={(e, node) => {
-    e.stopPropagation();
-    selectEdge(null as any); // clear edge selection when selecting a node
+  onNodeClick={(_, node) => {
+    // clear edge selection when selecting a node
+    selectEdge(null);
     selectNode(node.id);
   }}
-  onEdgeClick={(e, edge) => {
-    e.stopPropagation();
-    selectNode(null as any); // clear node selection when selecting an edge
+  onEdgeClick={(_, edge) => {
+    // clear node selection when selecting an edge
+    selectNode(null);
     selectEdge(edge.id);
   }}
-  onPaneClick={(e) => {
-    e.stopPropagation();
-    selectNode(null as any);
-    selectEdge(null as any);
+  onPaneClick={() => {
+    // click empty canvas -> clear selection (baseline inspector)
+    selectNode(null);
+    selectEdge(null);
   }}
   onEdgeUpdateStart={handleEdgeUpdateStart}
   onEdgeUpdate={handleEdgeUpdate}
   onEdgeUpdateEnd={handleEdgeUpdateEnd}
   edgeUpdaterRadius={18}
-  panOnDrag={true}        // ✅ drag empty canvas to pan
-  panOnScroll={false}     // ✅ do not pan on wheel/trackpad scroll
-  zoomOnScroll={false}    // ✅ do not zoom on scroll
-  zoomOnPinch={true}      // ✅ pinch zoom stays
-  preventScrolling={true} // ✅ stop page scroll behind canvas
+  panOnDrag={true}
+  panOnScroll={false}
+  zoomOnScroll={false}
+  zoomOnPinch={true}
+  preventScrolling={true}
   isValidConnection={() => true}
   defaultViewport={{ x: 0, y: 0, zoom: 0.75 }}
   minZoom={0.05}
@@ -4044,9 +4442,7 @@ const masterTimelineItems = useMemo(() => {
     type: edgeMode === 'radius' ? 'smoothstep' : 'default',
     markerEnd: { type: MarkerType.ArrowClosed },
   }}
-  connectionLineType={
-    edgeMode === 'radius' ? ConnectionLineType.SmoothStep : ConnectionLineType.Bezier
-  }
+  connectionLineType={edgeMode === 'radius' ? ConnectionLineType.SmoothStep : ConnectionLineType.Bezier}
 >
   <MiniMap />
   <Controls />
