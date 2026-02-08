@@ -42,7 +42,7 @@ export default function InvestorOnePager() {
           <p className="text-lg leading-relaxed opacity-80">People. Projects. Budgets. Time — Connected.</p>
 
           <p className="text-base leading-relaxed opacity-80">
-            The Bureau is a visual operating layer for the creative and technology sector. It connects resourcing, timelines, and commercial reality
+            The Bureau is a visual operating layer for creative and technology studios. It connects resourcing, timelines, and commercial reality
             into one living map so leaders can make critical decisions without app switching or hunting for data.
           </p>
 
@@ -93,7 +93,7 @@ export default function InvestorOnePager() {
               <div>
                 The Bureau isn’t trying to out-feature existing productivity tools like Asana, Monday, Linear, Notion, Jira, or Celoxis - it’s solving a different problem. 
                 Those platforms are powerful ops & analytic systems, but they get that power from a structure riddled with dependencies: 
-                daily assigned tasks, fields & statuses, permissions, due dates, and general ongoing project manager maintenance. 
+                daily assigned tasks, fields & statuses, permissions, due dates, and general ongoing Project Manager maintenance. 
                 </div>
                  <div>
                 The Bureau is an operating map, not a work tracker: It's a lightweight canvas where the core realities of running a studio: people, projects, budgets, debits, and time - can be arranged, connected, and reshaped in minutes to test out a plan. </div>
@@ -126,6 +126,27 @@ export default function InvestorOnePager() {
               <div>
                 The graph becomes the studio’s proprietary living operating model: customised node inputs connected to project organisms, surfaced constraints, decision path comparisions, and historical
                 achival-grade context. Over time, this enables derived views, and restrained AI reporting, without losing the underlying map of prototypes.
+              </div>
+              
+            </div>
+          </div>
+        </section>
+
+                  {/* Use Case 1 */}
+        <section className="mt-12">
+          <div className="text-xs uppercase tracking-wide opacity-50">Case Record Excerpt</div>
+
+          <div className="mt-4 rounded-2xl border border-black/10 p-4">
+            <div className="space-y-2 text-sm opacity-80">
+              <div>
+                When a project needs outside help, one question might be: what external figure can this budget actually accommodate without impacting our financial goals down the line? 
+                The Bureau turns that into a fast, controlled check.</div>
+                <div>
+                The product answers immediately, translating the plan into a clear affordability number: what you can pay, for how long, and what it does to totals. 
+                Iterate scenarios in seconds until the desired budget narrative holds, rather than risking vendor rate cards dictating a dangerous reality.
+                The output is a simple answer with a defensible rationale: yes, we can afford this, not at that rate, or only if we change X. </div>
+                <div>This turns contractor hiring from an anxious judgement call into an auditable, repeatable workflow. Prototype the hire, test the impact, commit with authority.
+
               </div>
               
             </div>

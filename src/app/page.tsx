@@ -288,11 +288,11 @@ export default function LandingV2() {
         {/* Prototype → Test → Commit */}
         <section className="mt-12">
           <div className="rounded-2xl border border-black/10 p-4">
-            <div className="text-xs uppercase tracking-wide opacity-50">Q4, 2027 in 20 Mins</div>
+            <div className="text-xs uppercase tracking-wide opacity-50">Q4, 2027 ... in 20 Mins</div>
 
             <div className="mt-3 space-y-2 text-sm opacity-80">
               <div>
-                <span className="font-medium">Prototype →</span> your full operation.
+                <span className="font-medium">Prototype →</span> your studio ops.
               </div>
               <div>
                 <span className="font-medium">Test →</span> iterative models against reality.
