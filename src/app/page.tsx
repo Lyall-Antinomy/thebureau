@@ -168,14 +168,14 @@ export default function LandingV2() {
       {/* Founding */}
       <div>
         <div className="text-sm font-medium">Founding Workspace</div>
-        <div className="mt-1 text-2xl font-medium tracking-tight">€299</div>
+        <div className="mt-1 text-2xl font-medium tracking-tight">€499</div>
         <div className="mt-1 text-xs opacity-60">One-time payment</div>
 
         <div className="mt-4 space-y-2 text-sm opacity-80">
           {/* Treat this like "Contributors 25" */}
           <div className="text-sm font-medium">Leadership</div>
-          <div className="mt-1 text-2xl font-medium tracking-tight">10</div>
-          <div className="mt-1 text-xs opacity-60">Leadership seats included</div>
+          <div className="mt-1 text-2xl font-medium tracking-tight">5</div>
+          <div className="mt-1 text-xs opacity-60">Leadership accounts included</div>
 
           <div className="mt-4 space-y-2 text-sm opacity-80">
             <div>Unlimited desktop app access</div>
@@ -185,7 +185,7 @@ export default function LandingV2() {
           </div>
           <div className="mt-4 text-sm">
           <span className="opacity-60">Scale:</span>{' '}
-          <span className="font-medium">€12 / month</span>{' '}
+          <span className="font-medium">€10 / month</span>{' '}
           <span className="opacity-60">per additional 5 leaders</span>
         </div>
         </div>
@@ -197,8 +197,8 @@ export default function LandingV2() {
       {/* Contributors (stacked under Founding) */}
       <div>
         <div className="text-sm font-medium">Contributors</div>
-        <div className="mt-1 text-2xl font-medium tracking-tight">25</div>
-        <div className="mt-1 text-xs opacity-60">Employee seats included</div>
+        <div className="mt-1 text-2xl font-medium tracking-tight">15</div>
+        <div className="mt-1 text-xs opacity-60">Employee accounts included</div>
 
         <div className="mt-4 space-y-2 text-sm opacity-80">
           <div>Mobile-only</div>
@@ -208,35 +208,17 @@ export default function LandingV2() {
 
         <div className="mt-4 text-sm">
           <span className="opacity-60">Scale:</span>{' '}
-          <span className="font-medium">€10 / month</span>{' '}
+          <span className="font-medium">€5 / month</span>{' '}
           <span className="opacity-60">per additional 5 contributors</span>
         </div>
       </div>
     </div>
-
-
-            <div className="rounded-2xl border border-black/10 p-4">
-              <div className="text-sm font-medium">Annual Version Upgrade</div>
-              <div className="mt-1 text-2xl font-medium tracking-tight">€179</div>
-              <div className="mt-1 text-xs opacity-60">Per year</div>
-
-              <div className="mt-4 space-y-2 text-sm opacity-80">
-                <div>Upgrade to the latest version</div>
-                <div>Feature & security improvements</div>
-                <div>Merch gift pack (Select items on checkout)</div>
-                
-              </div>
-
-              <div className="mt-4 text-xs opacity-60">
-                Renew only when you want to upgrade to the next major build.
-              </div>
-            </div>
           </div>
         </section>
 
         {/* Seats & Access */}
         <section className="mt-12">
-          <div className="text-xs uppercase tracking-wide opacity-50">Seats &amp; access</div>
+          <div className="text-xs uppercase tracking-wide opacity-50">Access</div>
 
           <div className="mt-4 rounded-2xl border border-black/10 p-4">
             <div className="text-sm opacity-70">
@@ -279,7 +261,7 @@ export default function LandingV2() {
             </div>
 
             <div className="mt-4 text-xs opacity-60">
-              Planning prototype inputs only. No actual linked banking. Compensation and other sensitive fields are permissioned and
+              Compensation and other sensitive fields are permissioned and
               never exposed to Contributors.
             </div>
           </div>

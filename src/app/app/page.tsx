@@ -2,6 +2,8 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import ReactFlow, {
+  ReactFlowProvider,
+  useReactFlow,
   addEdge,
   Background,
   Controls,
@@ -18,6 +20,7 @@ import ReactFlow, {
   Handle,
   Position,
   ConnectionLineType,
+  type ReactFlowInstance,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { nanoid } from 'nanoid';
@@ -35,6 +38,7 @@ type Studio = '27b' | 'Antinomy Studio';
 
 type NodeKind =
   | 'person'
+  | 'alias'
   | 'capacity'
   | 'project'
   | 'budget'
@@ -47,9 +51,47 @@ type BaseNodeData = {
   kind: NodeKind;
 };
 
-type ViewMode = 'workflow' | 'timeline';
+type ViewMode = 'manager' | 'workflow' | 'reports';
 type Dept = 'unassigned' | 'ops' | 'design' | 'dev';
 
+
+
+type MasterResource = {
+  id: string;
+  title: string;
+
+  // org/meta
+  entity: Studio;
+  dept: Dept;
+  color: string;
+
+  // comp model
+  compModel: 'Full time' | 'External';
+  contractStartISO: string; // YYYY-MM-DD
+  contractEndISO: string;   // YYYY-MM-DD
+  salaryAnnual: number;
+  billRatePerHour: number;
+};
+
+type AliasFeeMode = 'fixed' | 'dayRate';
+
+type AliasData = {
+  title: string; // first name only for the node label
+  kind: 'alias';
+  masterResourceId: string;
+  personNameSnapshot: string; // full name snapshot for debits/ledger lines
+  dept: Dept;
+  color: string;
+  compModel: 'Full time' | 'External';
+
+  // External-only finance (stored per alias)
+  feeMode: AliasFeeMode;
+  feeValueEUR: number;
+  billToBudgetId?: string | null;
+
+  // Full time-only linkage (stored per alias)
+  linkToTimelineId?: string | null;
+};
 
 type PersonData = {
   title: string;
@@ -72,6 +114,7 @@ type ProjectData = BaseNodeData & {
   kind: 'project';
   studio?: Studio;
   client?: string; // user input (shown in Project node + editable in inspector)
+  treeCollapsed?: boolean; // canvas-only filing toggle (hide/show connected nodes)
 };
 
 type BudgetPhase = 'design' | 'dev' | 'ops';
@@ -122,6 +165,7 @@ type LedgerData = {
 
 type GraphNodeData =
   | PersonData
+  | AliasData
   | CapacityData
   | ProjectData
   | BudgetData
@@ -140,6 +184,7 @@ type PersistedGraph = {
   nodes: RFNode<GraphNodeData>[];
   edges: Edge<GraphEdgeData>[];
   edgeMode: 'radius' | 'bezier';
+  masterResources?: MasterResource[];
 };
 
 type EdgeMode = 'radius' | 'bezier';
@@ -152,6 +197,10 @@ type GraphState = {
   setInspectorCollapsed: (v: boolean) => void;
   toggleInspectorCollapsed: () => void;
 
+  // Ledger HUD (screen-space)
+  ledgerCollapsed: boolean;
+  setLedgerCollapsed: (v: boolean) => void;
+  toggleLedgerCollapsed: () => void;
 
   
   edgeCornerRadius: number;
@@ -165,11 +214,16 @@ type GraphState = {
   nodes: RFNode<GraphNodeData>[];
   edges: Edge<GraphEdgeData>[];
 
+  // Manager data (Master Resources live outside the canvas graph)
+  masterResources: MasterResource[];
+
   // Selection
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
+  selectedMasterResourceId: string | null;
   selectNode: (id: string | null) => void;
   selectEdge: (id: string | null) => void;
+  selectMasterResource: (id: string | null) => void;
 
   // Add nodes
   addPerson: () => void;
@@ -178,6 +232,15 @@ type GraphState = {
   addBudget: () => void;
   addTimeline: () => void;
   addTurnover: (t: TurnoverType) => void;
+
+  // Aliases (spawned from Master Resources)
+  spawnAliasFromMaster: (masterResourceId: string, position: { x: number; y: number }) => string;
+
+  // Master Resources (Manager)
+  addMasterResource: () => void;
+  updateMasterResourceTitle: (id: string, title: string) => void;
+  updateMasterResourceMeta: (id: string, patch: Partial<Omit<MasterResource, 'id' | 'title'>>) => void;
+
   addLedger: () => void;
 
   // ReactFlow handlers
@@ -197,12 +260,15 @@ type GraphState = {
   ) => void;
 
   updatePersonMeta: (id: string, patch: Partial<PersonData>) => void;
+  updateAliasMeta: (id: string, patch: Partial<AliasData>) => void;
   updateProjectStudio: (id: string, studio: Studio) => void;
   updateProjectClient: (id: string, client: string) => void;
+  toggleProjectTreeCollapsed: (projectId: string) => void;
 
   updateEdgeLabel: (id: string, label: string) => void;
   updateEdgeConnection: (edgeId: string, newConn: Connection) => void;
   deleteEdge: (edgeId: string) => void;
+  deleteMasterResource: (id: string) => void;
 
   // Persistence
   hydrateFromPersisted: (p: PersistedGraph) => void;
@@ -358,6 +424,14 @@ function deptLabel(d: Dept) {
   return 'Unassigned';
 }
 
+
+function firstNameOf(name: string) {
+  const t = String(name ?? '').trim();
+  if (!t) return '';
+  // Split on whitespace; take first token (handles "Oscar Pico" → "Oscar")
+  return t.split(/\s+/)[0] ?? t;
+}
+
 function safeNum(n: number) {
   return Number.isFinite(n) ? n : 0;
 }
@@ -395,6 +469,25 @@ function todayISO() {
   return `${y}-${m}-${day}`;
 }
 
+function isoToDMY(iso: string) {
+  // expects YYYY-MM-DD; fall back to input if invalid
+  const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(String(iso));
+  if (!m) return String(iso);
+  const [, y, mo, d] = m;
+  return `${d}.${mo}.${y}`;
+}
+
+function weeksUntil(isoEnd: string) {
+  if (!isoEnd) return 0;
+  const end = new Date(isoEnd);
+  const endMs = end.getTime();
+  if (!Number.isFinite(endMs)) return 0;
+  const now = new Date();
+  const diffMs = endMs - now.getTime();
+  const w = Math.ceil(diffMs / (1000 * 60 * 60 * 24 * 7));
+  return Math.max(0, w);
+}
+
 function budgetTotal(b: BudgetData) {
   return safeNum(b.designAmount) + safeNum(b.devAmount) + safeNum(b.opsAmount);
 }
@@ -415,6 +508,7 @@ function getNodeKindById(nodes: RFNode<GraphNodeData>[], id?: string | null): No
 
 function reactFlowTypeForNode(kind: NodeKind): string {
   if (kind === 'person') return 'personNode';
+  if (kind === 'alias') return 'aliasNode';
   if (kind === 'capacity') return 'capacityNode';
   if (kind === 'project') return 'projectNode';
   if (kind === 'budget') return 'budgetNode';
@@ -422,6 +516,36 @@ function reactFlowTypeForNode(kind: NodeKind): string {
   if (kind === 'turnover') return 'turnoverNode';
   if (kind === 'ledger') return 'ledgerNode'; // ✅ add this
   return 'projectNode';
+}
+
+
+function normalizeEdgeForMode(
+  e: Edge<GraphEdgeData>,
+  edgeMode: EdgeMode,
+  edgeCornerRadius: number
+): Edge<GraphEdgeData> {
+  const isRadius = edgeMode === 'radius';
+  const corner = Number.isFinite(edgeCornerRadius) ? edgeCornerRadius : 50;
+
+  // Normalize marker sizing if present
+  const ms = (m: any) => (m ? { ...m, width: 12, height: 12 } : m);
+
+  const next: any = {
+    ...e,
+    type: isRadius ? 'smoothstep' : 'default',
+    style: { ...(e.style ?? {}), strokeWidth: 2 },
+    markerStart: ms((e as any).markerStart),
+    markerEnd: ms((e as any).markerEnd),
+  };
+
+  if (isRadius) {
+    next.pathOptions = { ...((e as any).pathOptions ?? {}), borderRadius: corner };
+  } else {
+    // Keep any existing pathOptions harmlessly; ReactFlow ignores them on 'default'
+    next.pathOptions = undefined;
+  }
+
+  return next;
 }
 
 function tinyPort(): React.CSSProperties {
@@ -447,6 +571,8 @@ function getNodeBg(kind: NodeKind, turnoverType?: TurnoverType) {
   switch (kind) {
     case 'person':
       return 'rgba(241, 245, 249, 1)';
+    case 'alias':
+      return 'rgba(241, 245, 249, 1)';
     case 'capacity':
       return 'rgba(241, 245, 249, 1)';
     case 'project':
@@ -465,6 +591,7 @@ function edgeColorFromSource(nodes: RFNode<GraphNodeData>[], sourceId?: string |
   const source = nodes.find((n) => n.id === sourceId);
   if (!source) return 'rgba(0,0,0,0.35)';
   if (source.data.kind === 'person') return (source.data as PersonData).color;
+  if (source.data.kind === 'alias') return (source.data as AliasData).color;
   return 'rgba(0,0,0,0.35)';
 }
 
@@ -475,12 +602,18 @@ function isValidConnectionStrict(nodes: RFNode<GraphNodeData>[], c: Connection) 
   const targetKind = getNodeKindById(nodes, c.target);
 
   // Capacity → Person (capacity-only)
-  if (sourceKind === 'capacity' && targetKind === 'person') {
+  if (sourceKind === 'capacity' && targe(tKind === 'person' || tKind === 'alias')) {
     return c.sourceHandle === 'capacity-out' && c.targetHandle === 'capacity-in';
   }
 
   // Person → Project (project-only)
   if (sourceKind === 'person' && targetKind === 'project') {
+    const okTeamPort = c.targetHandle === 'ops' || c.targetHandle === 'design' || c.targetHandle === 'dev';
+    return c.sourceHandle === 'project-out' && okTeamPort;
+  }
+
+  // Alias → Project (assignment)
+  if (sourceKind === 'alias' && targetKind === 'project') {
     const okTeamPort = c.targetHandle === 'ops' || c.targetHandle === 'design' || c.targetHandle === 'dev';
     return c.sourceHandle === 'project-out' && okTeamPort;
   }
@@ -613,8 +746,8 @@ function computeProjectTeamByDept(
 
     // We consider a "team assignment" as: a person connected to a project's dept handle.
     // Support both directions (in case user connected "backwards").
-    const projectIsTarget = e.target === projectId && sKind === 'person' && isDept((e as any).targetHandle);
-    const projectIsSource = e.source === projectId && tKind === 'person' && isDept((e as any).sourceHandle);
+    const projectIsTarget = e.target === projectId && (sKind === 'person' || sKind === 'alias') && isDept((e as any).targetHandle);
+    const projectIsSource = e.source === projectId && (tKind === 'person' || tKind === 'alias') && isDept((e as any).sourceHandle);
 
     if (projectIsTarget) {
       const dept = (e as any).targetHandle as DeptKey;
@@ -628,7 +761,16 @@ function computeProjectTeamByDept(
   // Stable display ordering (by person title)
   const sortByTitle = (ids: string[]) =>
     ids
-      .map((pid) => ({ pid, title: String((byId.get(pid)?.data as any)?.title ?? '').trim() }))
+      .map((pid) => {
+        const nd = byId.get(pid);
+        const k = nd?.data?.kind;
+        const d: any = nd?.data ?? {};
+        const title =
+          k === 'alias'
+            ? String(d.personNameSnapshot ?? d.fullName ?? d.title ?? d.firstName ?? '').trim()
+            : String(d.title ?? '').trim();
+        return { pid, title };
+      })
       .sort((a, b) => a.title.localeCompare(b.title))
       .map((x) => x.pid);
 
@@ -678,6 +820,49 @@ function computeProjectDebits(
 
   const projectBudgetIds = getBudgetIdsForProject(nodes, edges, projectId);
   const activeBudgetId = opts?.budgetId ?? null;
+
+  // --- Alias → Project assignment edges (external debits source) ---
+  // MVP: only alias.fixed fees are wired into budgets (day rate remains UI-only for now).
+  const aliasToProjectEdges = edges.filter((e) => {
+    if (e.target !== projectId) return false;
+    const sk = getNodeKindById(nodes, e.source);
+    const tk = getNodeKindById(nodes, e.target);
+    const isAssignment = (e.data as any)?.edgeType === 'assignment';
+    return sk === 'alias' && tk === 'project' && isAssignment;
+  });
+
+  for (const e of aliasToProjectEdges) {
+    const aliasNode = nodes.find((n) => n.id === e.source);
+    if (!aliasNode || aliasNode.data.kind !== 'alias') continue;
+
+    const a = aliasNode.data as AliasData;
+    if (a.compModel !== 'External') continue;
+    if (a.feeMode !== 'fixed') continue;
+
+    const fee = safeNum(a.feeValueEUR);
+    if (fee <= 0) continue;
+
+    // ✅ Budget scoping
+    const billToBudgetId = (a as any).billToBudgetId ?? null;
+    if (activeBudgetId) {
+      if (billToBudgetId) {
+        if (billToBudgetId !== activeBudgetId) continue;
+      } else {
+        if (!(projectBudgetIds.length === 1 && projectBudgetIds[0] === activeBudgetId)) continue;
+      }
+    }
+
+    const edgePhase = (e.targetHandle as any) ?? 'design';
+    const phase: DebitPhase =
+      edgePhase === 'dev' || edgePhase === 'ops' || edgePhase === 'design' ? edgePhase : 'design';
+
+    lines.push({
+      personName: a.personNameSnapshot || a.title,
+      phase,
+      amount: fee,
+      color: a.color ?? '#999999',
+    });
+  }
 
   const personToProjectEdges = edges.filter(
     (e) =>
@@ -956,6 +1141,7 @@ function getDefaultGraph(): PersistedGraph {
     edgeMode: 'radius',
     nodes: [],
     edges: [],
+    masterResources: [],
   };
 }
 type DockSide = 'top' | 'bottom';
@@ -1051,27 +1237,45 @@ function computeDockState(
  * -------------------------
  */
 
+function normalizeEdge(e: any) {
+  const style = { ...(e.style ?? {}), strokeWidth: 2 };
+
+  const markerEnd =
+    e.markerEnd && typeof e.markerEnd === "object"
+      ? { ...e.markerEnd, width: 12, height: 12 }
+      : e.markerEnd ?? { type: "arrowclosed", width: 12, height: 12 };
+
+  // keep existing pathOptions if present
+  const pathOptions = e.pathOptions ? { ...e.pathOptions } : undefined;
+
+  return { ...e, style, markerEnd, pathOptions };
+}
+
+function normalizeEdges(edges: any[]) {
+  return edges.map(normalizeEdge);
+}
+
 const useGraph = create<GraphState>((set, get) => {
   
   const ui =
-  typeof window !== 'undefined'
-    ? readUiPrefs()
-    : { inspectorCollapsed: false };
+    typeof window !== 'undefined'
+      ? readUiPrefs()
+      : { inspectorCollapsed: false, ledgerCollapsed: false };
 
   const def = getDefaultGraph();
 
   const UI_STORAGE_KEY = 'studio-ops-ui:v1';
 
-type UiPrefs = { inspectorCollapsed: boolean };
+  type UiPrefs = { inspectorCollapsed: boolean; ledgerCollapsed: boolean };
 
 function readUiPrefs(): UiPrefs {
   try {
     const raw = localStorage.getItem(UI_STORAGE_KEY);
-    if (!raw) return { inspectorCollapsed: false };
+    if (!raw) return { inspectorCollapsed: false, ledgerCollapsed: false };
     const parsed = JSON.parse(raw);
-    return { inspectorCollapsed: !!parsed.inspectorCollapsed };
+    return { inspectorCollapsed: !!parsed.inspectorCollapsed, ledgerCollapsed: !!parsed.ledgerCollapsed };
   } catch {
-    return { inspectorCollapsed: false };
+    return { inspectorCollapsed: false, ledgerCollapsed: false };
   }
 }
 
@@ -1088,14 +1292,28 @@ inspectorCollapsed: ui.inspectorCollapsed,
 
 setInspectorCollapsed: (v: boolean) => {
   set(() => ({ inspectorCollapsed: v }));
-  writeUiPrefs({ inspectorCollapsed: v });
+  writeUiPrefs({ inspectorCollapsed: v, ledgerCollapsed: get().ledgerCollapsed });
 },
 
 toggleInspectorCollapsed: () => {
   const next = !get().inspectorCollapsed;
   set(() => ({ inspectorCollapsed: next }));
-  writeUiPrefs({ inspectorCollapsed: next });
+  writeUiPrefs({ inspectorCollapsed: next, ledgerCollapsed: get().ledgerCollapsed });
 },
+
+    // --- UI prefs (Ledger HUD) ---
+    ledgerCollapsed: ui.ledgerCollapsed,
+
+    setLedgerCollapsed: (v: boolean) => {
+      set(() => ({ ledgerCollapsed: v }));
+      writeUiPrefs({ inspectorCollapsed: get().inspectorCollapsed, ledgerCollapsed: v });
+    },
+
+    toggleLedgerCollapsed: () => {
+      const next = !get().ledgerCollapsed;
+      set(() => ({ ledgerCollapsed: next }));
+      writeUiPrefs({ inspectorCollapsed: get().inspectorCollapsed, ledgerCollapsed: next });
+    },
 
     // Corner radius for smoothstep edges
     edgeCornerRadius: 50,
@@ -1115,8 +1333,11 @@ toggleInspectorCollapsed: () => {
     nodes: def.nodes ?? [],
     edges: def.edges ?? [],
 
+    masterResources: (def as any).masterResources ?? [],
+
     selectedNodeId: null,
     selectedEdgeId: null,
+    selectedMasterResourceId: null,
 
     hydrateFromPersisted: (p: PersistedGraph) => {
       const hydratedNodes = (p.nodes ?? []).map((n) => ({
@@ -1125,10 +1346,11 @@ toggleInspectorCollapsed: () => {
       }));
 
       set(() => ({
-        viewMode: p.viewMode ?? 'workflow',
+        viewMode: (p.viewMode === 'timeline' ? 'reports' : (p.viewMode ?? 'workflow')) as ViewMode,
         edgeMode: p.edgeMode ?? 'radius',
         nodes: hydratedNodes,
         edges: p.edges ?? [],
+        masterResources: p.masterResources ?? [],
         selectedNodeId: null,
         selectedEdgeId: null,
       }));
@@ -1140,8 +1362,10 @@ toggleInspectorCollapsed: () => {
         viewMode: fresh.viewMode,
         nodes: fresh.nodes,
         edges: fresh.edges,
+        masterResources: (fresh as any).masterResources ?? [],
         selectedNodeId: null,
         selectedEdgeId: null,
+        selectedMasterResourceId: null,
       }));
     },
 
@@ -1241,6 +1465,43 @@ toggleInspectorCollapsed: () => {
         ],
       })),
 
+    spawnAliasFromMaster: (masterResourceId, position) => {
+      const master = get().masterResources.find((r) => r.id === masterResourceId);
+      const firstName = (master?.title ?? 'Alias').trim().split(/\s+/)[0] || 'Alias';
+      const personNameSnapshot = (master?.title ?? firstName).trim() || firstName;
+      const dept = (master?.dept ?? 'unassigned') as Dept;
+      const color = master?.color ?? DEPT_COLOURS[dept] ?? DEPT_COLOURS.unassigned;
+      const compModel = (master?.compModel ?? 'Full time') as 'Full time' | 'External';
+
+      const id = `alias-${nanoid(7)}`;
+
+      set((s) => ({
+        nodes: [
+          ...s.nodes,
+          {
+            id,
+            type: 'aliasNode',
+            position,
+            data: {
+              kind: 'alias',
+              title: firstName,
+              masterResourceId,
+              personNameSnapshot,
+              dept,
+              color,
+              compModel,
+              feeMode: compModel === 'External' ? 'fixed' : 'dayRate',
+              feeValueEUR: 0,
+              billToBudgetId: null,
+              linkToTimelineId: null,
+            },
+          },
+        ],
+      }));
+
+      return id;
+    },
+
     addTurnover: (t) =>
   set((s) => ({
     nodes: [
@@ -1268,8 +1529,192 @@ addLedger: () =>
     ],
   })), // ✅ COMMA HERE
 
+
+    // Master Resources (Manager)
+    addMasterResource: () => {
+      const id = `resource-${nanoid(6)}`;
+      set((s) => ({
+        masterResources: [
+          ...s.masterResources,
+          {
+            id,
+            title: 'New Resource',
+            entity: '27b',
+            dept: 'unassigned',
+            color: DEPT_COLOURS.unassigned,
+            compModel: 'Full time',
+            contractStartISO: todayISO(),
+            contractEndISO: todayISO(),
+            salaryAnnual: 0,
+            billRatePerHour: 0,
+          },
+        ],
+        selectedMasterResourceId: id,
+        selectedNodeId: null,
+        selectedEdgeId: null,
+      }));
+    },
+
+  deleteMasterResource: (id: string) =>
+      set((s) => {
+        const aliasIds = new Set(
+          s.nodes
+            .filter((n) => n.data?.kind === "alias" && (n.data as any).masterResourceId === id)
+            .map((n) => n.id)
+        );
+
+        const nextNodes = s.nodes.filter(
+          (n) => !(n.data?.kind === "alias" && (n.data as any).masterResourceId === id)
+        );
+        const nextEdges = s.edges.filter((e) => !aliasIds.has(e.source) && !aliasIds.has(e.target));
+
+        const selectedNodeId = s.selectedNodeId && aliasIds.has(s.selectedNodeId) ? null : s.selectedNodeId;
+        const selectedEdgeId =
+          s.selectedEdgeId && nextEdges.findIndex((e) => e.id === s.selectedEdgeId) === -1
+            ? null
+            : s.selectedEdgeId;
+
+        return {
+          masterResources: s.masterResources.filter((r) => r.id !== id),
+          nodes: nextNodes,
+          edges: nextEdges,
+          selectedNodeId,
+          selectedEdgeId,
+          selectedMasterResourceId: s.selectedMasterResourceId === id ? null : s.selectedMasterResourceId,
+        };
+      }),
+
+    updateMasterResourceTitle: (id, title) =>
+      set((s) => {
+        const masterResources = s.masterResources.map((r) => (r.id === id ? { ...r, title } : r));
+
+        // Sync aliases (data truth) so any computed systems that read alias data remain deterministic.
+        const updatedNodes = s.nodes.map((n) => {
+          if (n.data.kind !== 'alias') return n;
+          const a = n.data as AliasData;
+          if (a.masterResourceId !== id) return n;
+
+          const firstName = firstNameOf(title) || a.title;
+          return {
+            ...n,
+            data: {
+              ...a,
+              // keep node label minimal, but update snapshot for financial lines to avoid stale identity
+              title: firstName,
+              personNameSnapshot: title,
+            },
+          };
+        });
+
+        // Keep assignment edge styling aligned to current master colour (dept).
+        const mr = masterResources.find((r) => r.id === id) ?? null;
+        const stroke = String(mr?.color ?? 'rgba(0,0,0,0.35)');
+        const aliasIds = new Set(
+          updatedNodes
+            .filter((n) => n.data.kind === 'alias' && (n.data as AliasData).masterResourceId === id)
+            .map((n) => n.id)
+        );
+
+        const updatedEdges = s.edges.map((e) => {
+          const base = normalizeEdge(e);
+          if (!aliasIds.has(base.source)) return base;
+          return normalizeEdge({
+            ...base,
+            style: { ...(base.style ?? {}), stroke, strokeWidth: 2 },
+            data: { ...(base.data ?? {}), color: stroke },
+          });
+        });
+
+        return { masterResources, nodes: updatedNodes, edges: updatedEdges };
+      }),
+
+    updateMasterResourceMeta: (id, patch) =>
+      set((s) => {
+        const masterResources = s.masterResources.map((r) => {
+          if (r.id !== id) return r;
+          const next = { ...r, ...patch } as MasterResource;
+
+          // External contractors: contract dates + salary fields are not relevant.
+          // If user switches a master resource to External, clear these so they don't appear inherited.
+          if ('compModel' in patch && patch.compModel === 'External') {
+            next.contractStartISO = '';
+            next.contractEndISO = '';
+            next.salaryAnnual = 0;
+            next.billRatePerHour = 0;
+          }
+
+          // If switching back to Full time and dates are empty, seed sensible defaults.
+          if ('compModel' in patch && patch.compModel === 'Full time') {
+            if (!next.contractStartISO) next.contractStartISO = todayISO();
+            if (!next.contractEndISO) next.contractEndISO = todayISO();
+          }
+
+          // keep color in sync with dept unless explicitly overridden
+          if ('dept' in patch && patch.dept) {
+            next.color = DEPT_COLOURS[patch.dept as Dept] ?? next.color;
+          }
+
+          return next;
+        });
+
+        const mr = masterResources.find((r) => r.id === id) ?? null;
+        const stroke = String(mr?.color ?? 'rgba(0,0,0,0.35)');
+
+        // Sync aliases so downstream systems that read alias data don't drift from Master truth.
+        const updatedNodes = s.nodes.map((n) => {
+          if (n.data.kind !== 'alias') return n;
+          const a = n.data as AliasData;
+          if (a.masterResourceId !== id) return n;
+
+          const nextComp = (mr?.compModel ?? a.compModel) as 'Full time' | 'External';
+          const nextDept = (mr?.dept ?? a.dept) as Dept;
+
+          // If a master flips to External, clear incompatible alias linkage (timeline links).
+          const linkToTimelineId =
+            nextComp === 'External' ? null : (a.linkToTimelineId ?? null);
+
+          // If master flips to Full time, clear external billing link by default.
+          const billToBudgetId =
+            nextComp === 'Full time' ? null : (a.billToBudgetId ?? null);
+
+          const feeValueEUR = nextComp === 'Full time' ? 0 : (a.feeValueEUR ?? 0);
+
+          return {
+            ...n,
+            data: {
+              ...a,
+              dept: nextDept,
+              color: stroke,
+              compModel: nextComp,
+              linkToTimelineId,
+              billToBudgetId,
+              feeValueEUR,
+            },
+          };
+        });
+
+        const aliasIds = new Set(
+          updatedNodes
+            .filter((n) => n.data.kind === 'alias' && (n.data as AliasData).masterResourceId === id)
+            .map((n) => n.id)
+        );
+
+        const updatedEdges = s.edges.map((e) => {
+          const base = normalizeEdge(e);
+          if (!aliasIds.has(base.source)) return base;
+          return normalizeEdge({
+            ...base,
+            style: { ...(base.style ?? {}), stroke, strokeWidth: 2 },
+            data: { ...(base.data ?? {}), color: stroke },
+          });
+        });
+
+        return { masterResources, nodes: updatedNodes, edges: updatedEdges };
+      }),
+
     onConnect: (c) => {
   const nodes = get().nodes;
+  const edges = get().edges;
   if (!isValidConnectionStrict(nodes, c)) return;
 
   const color = edgeColorFromSource(nodes, c.source ?? null);
@@ -1297,6 +1742,21 @@ addLedger: () =>
   const sourceKind = getNodeKindById(nodes, c.source);
   const targetKind = getNodeKindById(nodes, c.target);
 
+  // Enforce: an alias can only be assigned to ONE project.
+  if (sourceKind === 'alias' && targetKind === 'project') {
+    const existingProjectEdge = edges.find((e) => {
+      if (e.source !== c.source) return false;
+      const tk = getNodeKindById(nodes, e.target);
+      const isAssignment = (e.data as any)?.edgeType === 'assignment';
+      return tk === 'project' && isAssignment;
+    });
+
+    if (existingProjectEdge && existingProjectEdge.target !== c.target) {
+      // Reject: alias already assigned to a different project
+      return;
+    }
+  }
+
   // We want Budget/Timeline to "feed into" Project visually.
   // Without breaking ports, we keep the edge direction as-is and flip the arrow.
   const isProjectToBudgetOrTimeline =
@@ -1316,12 +1776,12 @@ addLedger: () =>
     // - Otherwise default arrow at END.
     ...(isProjectToBudgetOrTimeline
       ? {
-          markerStart: { type: MarkerType.ArrowClosed },
+          markerStart: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
           markerEnd: undefined,
         }
       : {
           markerStart: undefined,
-          markerEnd: { type: MarkerType.ArrowClosed },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
         }),
 
     // Edge render mode
@@ -1331,14 +1791,17 @@ addLedger: () =>
     ...(isRadius ? ({ pathOptions: { borderRadius: corner } } as any) : {}),
 
     style: {
-      strokeWidth: (c.source ?? '').startsWith('person') ? 2 : 2,
+      strokeWidth: 2,
       stroke: color,
     },
-    data: { color },
+    data: {
+      color,
+      ...(sourceKind === 'alias' && targetKind === 'project' ? ({ edgeType: 'assignment' } as any) : {}),
+    },
   };
 
   // 1) Add the edge (ONCE)
-  set((s) => ({ edges: addEdge(newEdge, s.edges) }));
+  set((s) => ({ edges: addEdge(newEdge, s.edges).map((e) => normalizeEdgeForMode(e as any, s.edgeMode, s.edgeCornerRadius)) }));
 
   // 2) Post-connect side-effects (titles/studio propagation only)
 
@@ -1486,10 +1949,17 @@ addLedger: () =>
     return { nodes: draggedNodes };
   }),
 
-    onEdgesChange: (changes) => set((s) => ({ edges: applyEdgeChanges(changes, s.edges) })),
+    onEdgesChange: (changes) =>
+      set((s) => ({
+        edges: applyEdgeChanges(changes, s.edges).map((e) => normalizeEdgeForMode(e as any, s.edgeMode, s.edgeCornerRadius)),
+      })),
 
-    selectNode: (id) => set(() => ({ selectedNodeId: id, selectedEdgeId: null })),
-    selectEdge: (id) => set(() => ({ selectedEdgeId: id, selectedNodeId: null })),
+    selectNode: (id) =>
+      set(() => ({ selectedNodeId: id, selectedEdgeId: null, selectedMasterResourceId: null })),
+    selectEdge: (id) =>
+      set(() => ({ selectedEdgeId: id, selectedNodeId: null, selectedMasterResourceId: null })),
+    selectMasterResource: (id) =>
+      set(() => ({ selectedMasterResourceId: id, selectedNodeId: null, selectedEdgeId: null })),
 
     updateNodeTitle: (id, title) =>
       set((s) => ({
@@ -1543,6 +2013,66 @@ const nextBillToPhase =
 
         return { nodes: updatedNodes, edges: updatedEdges };
       }),
+
+    updateAliasMeta: (id, patch) =>
+      set((s) => {
+        // Alias inspector should not be able to mutate Dept / Comp model.
+        // Those are defined on the Master Resource (source of truth).
+        const safePatch: Partial<AliasData> = { ...patch };
+        delete (safePatch as any).dept;
+        delete (safePatch as any).color;
+        delete (safePatch as any).compModel;
+        delete (safePatch as any).title;
+
+        const updatedNodes = s.nodes.map((n) => {
+          if (n.id !== id) return n;
+          if (n.data.kind !== 'alias') return n;
+
+          const a = n.data as AliasData;
+
+          const nextFeeMode = (safePatch.feeMode ?? a.feeMode) as AliasFeeMode;
+          const nextFeeValueEUR = safeNum(safePatch.feeValueEUR ?? a.feeValueEUR);
+
+          const nextBillToBudgetId =
+            safePatch.billToBudgetId !== undefined ? safePatch.billToBudgetId : a.billToBudgetId ?? null;
+
+          const nextLinkToTimelineId =
+            safePatch.linkToTimelineId !== undefined ? safePatch.linkToTimelineId : a.linkToTimelineId ?? null;
+
+          return {
+            ...n,
+            data: {
+              ...a,
+              ...safePatch,
+              feeMode: nextFeeMode,
+              feeValueEUR: nextFeeValueEUR,
+              billToBudgetId: nextBillToBudgetId,
+              linkToTimelineId: nextLinkToTimelineId,
+            },
+          };
+        });
+
+        // Keep edge styling deterministic & consistent (stroke width + marker sizing),
+        // and keep stroke color aligned with the Master Resource dept colour.
+        const alias = updatedNodes.find((n) => n.id === id);
+        const masterId = alias?.data.kind === 'alias' ? (alias.data as AliasData).masterResourceId : null;
+        const mr = masterId ? s.masterResources.find((r) => r.id === masterId) : null;
+        const stroke = String(mr?.color ?? (alias?.data as any)?.color ?? 'rgba(0,0,0,0.35)');
+
+        const updatedEdges = s.edges.map((e) => {
+          const isFromAlias = e.source === id;
+          const base = normalizeEdge(e);
+          if (!isFromAlias) return base;
+          return normalizeEdge({
+            ...base,
+            style: { ...(base.style ?? {}), stroke, strokeWidth: 2 },
+            data: { ...(base.data ?? {}), color: stroke },
+          });
+        });
+
+        return { nodes: updatedNodes, edges: updatedEdges };
+      }),
+
       updateProjectStudio: (id, studio) =>
   set((s) => ({
     nodes: s.nodes.map((n) => {
@@ -1560,6 +2090,16 @@ updateProjectClient: (id, client) =>
       return { ...n, data: { ...(n.data as ProjectData), client } };
     }),
   })),
+
+toggleProjectTreeCollapsed: (projectId) =>
+      set((s) => ({
+        nodes: s.nodes.map((n) => {
+          if (n.id !== projectId) return n;
+          if (n.data.kind !== 'project') return n;
+          const cur = Boolean((n.data as any).treeCollapsed);
+          return { ...n, data: { ...(n.data as ProjectData), treeCollapsed: !cur } };
+        }),
+      })),
 
     updateTimelineDates: (id, patch) =>
       set((s) => ({
@@ -1614,18 +2154,40 @@ updateProjectClient: (id, client) =>
             ? 'capacity'
             : 'linked';
 
-        const nextStrokeWidth = String(nextSource ?? '').startsWith('person') ? 3 : 2;
+        const sourceKind = getNodeKindById(s.nodes, nextSource);
+        const targetKind = getNodeKindById(s.nodes, nextTarget);
+        const isProjectToBudgetOrTimeline =
+          sourceKind === 'project' && (targetKind === 'budget' || targetKind === 'timeline');
 
-        return {
+        // keep edge rendering consistent system-wide
+        const modeNow = get().edgeMode;
+        const cornerNow = get().edgeCornerRadius;
+
+        const base: any = {
           ...e,
           source: nextSource,
           target: nextTarget,
           sourceHandle: nextSourceHandle ?? undefined,
           targetHandle: nextTargetHandle ?? undefined,
           label: nextLabel,
-          style: { ...(e.style ?? {}), stroke: newColor, strokeWidth: nextStrokeWidth },
+          style: { ...(e.style ?? {}), stroke: newColor, strokeWidth: 2 },
           data: { ...(e.data ?? {}), color: newColor },
+          type: modeNow === 'radius' ? 'smoothstep' : 'default',
+          ...(modeNow === 'radius'
+            ? ({ pathOptions: { ...((e as any).pathOptions ?? {}), borderRadius: cornerNow } } as any)
+            : {}),
         };
+
+        // Match onConnect arrow conventions (Project→Budget/Timeline arrows originate from Project side)
+        if (isProjectToBudgetOrTimeline) {
+          base.markerStart = { type: MarkerType.ArrowClosed, width: 12, height: 12 };
+          base.markerEnd = undefined;
+        } else {
+          base.markerStart = undefined;
+          base.markerEnd = { type: MarkerType.ArrowClosed, width: 12, height: 12 };
+        }
+
+        return base;
       }),
 
       // ✅ Side-effects when an edge is dragged onto a new node:
@@ -1699,11 +2261,76 @@ function PersonNode({ data }: { id: string; data: GraphNodeData }) {
   );
 }
 
+function AliasNode({ data }: { id: string; data: GraphNodeData }) {
+  if (data.kind !== 'alias') return null;
+
+  // Live truth: Alias display pulls from the Master Resource record.
+  // Alias keeps only per-assignment financial/linkage data.
+  const masterResources = useGraph((s) => s.masterResources);
+  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
+  const treeCollapsed = Boolean((data as any).treeCollapsed);
+  const mr = masterResources.find((r) => r.id === (data as any).masterResourceId) ?? null;
+
+  const compModel = (mr?.compModel ?? (data as any).compModel) as 'Full time' | 'External';
+  const color = String(mr?.color ?? (data as any).color ?? DEPT_COLOURS.unassigned);
+  const name = firstNameOf(String(mr?.title ?? (data as any).personNameSnapshot ?? (data as any).title ?? ''));
+
+  const isExternal = compModel === 'External';
+
+  return (
+    <div
+      className="node-card"
+      style={
+        card({
+          width: 140,
+          height: 44,
+          minWidth: 140,
+          maxWidth: 140,
+          padding: 10,
+          background: getNodeBg('alias'),
+        })
+      }
+    >
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="project-out"
+        style={{ width: 10, height: 10, background: color, border: '2px solid white' }}
+      />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: color }} />
+        <div style={{ fontWeight: 450, fontSize: 12, lineHeight: 1, whiteSpace: 'nowrap' }}>{name || '—'}</div>
+
+        {isExternal && (
+          <span
+            style={{
+              marginLeft: 'auto',
+              fontSize: 10,
+              lineHeight: 1,
+              padding: '3px 7px',
+              borderRadius: 999,
+              border: '1px solid rgba(0,0,0,0.12)',
+              background: 'rgba(255,255,255,0.75)',
+            }}
+          >
+            ext
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 function CapacityNode({ id, data }: { id: string; data: GraphNodeData }) {
   if (data.kind !== 'capacity') return null;
 
   const nodes = useGraph((s) => s.nodes);
   const edges = useGraph((s) => s.edges);
+  const masterResources = useGraph((s) => s.masterResources);
+  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
+  const treeCollapsed = Boolean((data as any).treeCollapsed);
 
   const personEdge = edges.find((e) => e.source === id && getNodeKindById(nodes, e.target) === 'person');
   const personId = personEdge?.target ?? null;
@@ -1818,6 +2445,7 @@ function DockClip({ side }: { side: 'top' | 'bottom' }) {
 }
 
 function CountBadge({ n }: { n: number }) {
+  const safe = Number.isFinite(n) ? n : 0;
   return (
     <span
       style={{
@@ -1831,12 +2459,13 @@ function CountBadge({ n }: { n: number }) {
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: 12,
-        fontWeight: 900,
+        // Use Geist regular for system counts (matches Project node badges)
+        fontWeight: 400,
         lineHeight: 1,
         boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
       }}
     >
-      {n}
+      {safe}
     </span>
   );
 }
@@ -1930,6 +2559,9 @@ function ProjectNodeBase({ id, data }: { id: string; data: GraphNodeData }) {
 
   const nodes = useGraph((s) => s.nodes);
   const edges = useGraph((s) => s.edges);
+  const masterResources = useGraph((s) => s.masterResources);
+  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
+  const treeCollapsed = Boolean((data as any).treeCollapsed);
 
   // computed ONLY from budgets connected to THIS project
   const { gross, net, budgetCount, signedCount } = computeProjectBudgetTotals(nodes, edges, id);
@@ -2001,7 +2633,18 @@ function ProjectNodeBase({ id, data }: { id: string; data: GraphNodeData }) {
 
   const getPersonName = (pid: string) => {
     const pn = nodes.find((n) => n.id === pid);
-    return String((pn?.data as any)?.title ?? '').trim();
+    if (!pn) return '';
+    const d: any = pn.data ?? {};
+
+    // Live truth for aliases: resolve name from the Master Resource record.
+    if (d.kind === 'alias') {
+      const mr = masterResources.find((r) => r.id === String(d.masterResourceId ?? '')) ?? null;
+      const full = String(mr?.title ?? d.personNameSnapshot ?? d.title ?? '').trim();
+      return firstNameOf(full);
+    }
+
+    const full = String(d.title ?? '').trim();
+    return firstNameOf(full);
   };
 
   const needsSignedAttention = budgetCount > 0 && signedCount < budgetCount;
@@ -2021,6 +2664,11 @@ function ProjectNodeBase({ id, data }: { id: string; data: GraphNodeData }) {
         padding: 18,
       })}
     >
+      {/* Filing toggle (hide/show connected nodes) */}
+      <div style={{ position: 'absolute', top: 14, right: 14, zIndex: 3 }}>
+        <BureauToggle on={!treeCollapsed} onToggle={() => toggleProjectTreeCollapsed(id)} label="" />
+      </div>
+
       {/* Handles */}
       {PROJECT_TEAM_PORTS.map((p) => (
         <Handle
@@ -2243,7 +2891,7 @@ function ProjectNodeBase({ id, data }: { id: string; data: GraphNodeData }) {
                 ) : (
                   <>
                     {shown.map((n, i) => (
-  <NamePill key={`${n}-${i}`} text={n} />
+                    <NamePill key={`${n}-${i}`} text={n} />
 ))}
                     {extra > 0 && <NamePill text={`+${extra}`} />}
                   </>
@@ -2290,6 +2938,9 @@ function BudgetNode({ id, data, selected }: NodeProps<GraphNodeData>) {
 
   const nodes = useGraph((s) => s.nodes);
   const edges = useGraph((s) => s.edges);
+  const masterResources = useGraph((s) => s.masterResources);
+  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
+  const treeCollapsed = Boolean((data as any).treeCollapsed);
 
   const computed = computeBudgetNetForBudgetNode(nodes, edges, id);
   const grossTotal = computed?.grossTotal ?? budgetTotal(data);
@@ -2513,6 +3164,9 @@ function TurnoverNode({ id, data }: { id: string; data: GraphNodeData }) {
 
   const nodes = useGraph((s) => s.nodes);
   const edges = useGraph((s) => s.edges);
+  const masterResources = useGraph((s) => s.masterResources);
+  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
+  const treeCollapsed = Boolean((data as any).treeCollapsed);
 
   const incomingBudgetIds = edges.filter((e) => e.target === id).map((e) => e.source).filter(Boolean);
 
@@ -2577,6 +3231,7 @@ function TurnoverNode({ id, data }: { id: string; data: GraphNodeData }) {
 
 const nodeTypes = {
   personNode: PersonNode,
+  aliasNode: AliasNode,
   capacityNode: CapacityNode,
   projectNode: ProjectNodeV2,
   budgetNode: BudgetNode,
@@ -2591,6 +3246,9 @@ function LedgerNode({ id, data }: { id: string; data: GraphNodeData }) {
 
   const nodes = useGraph((s) => s.nodes);
   const edges = useGraph((s) => s.edges);
+  const masterResources = useGraph((s) => s.masterResources);
+  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
+  const treeCollapsed = Boolean((data as any).treeCollapsed);
 
   // ✅ Pull ALL budget nodes (no wiring required)
   const allBudgetIds = nodes
@@ -2838,6 +3496,144 @@ const inputStyle: React.CSSProperties = {
   fontSize: 12,
 };
 
+function InspectorSelect({
+  value,
+  onValueChange,
+  options,
+  minWidth = 260,
+}: {
+  value: string;
+  onValueChange: (v: string) => void;
+  options: Array<{ value: string; label: string }>;
+  minWidth?: number;
+}) {
+  return (
+    <Select.Root value={value} onValueChange={onValueChange}>
+      <Select.Trigger
+        style={{
+          marginTop: 6,
+          width: '100%',
+          padding: '10px 12px',
+          borderRadius: 12,
+          border: '1px solid rgba(0,0,0,0.10)',
+          background: 'white',
+          fontSize: 13,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          lineHeight: 1.2,
+          cursor: 'pointer',
+          paddingRight: 16,
+        }}
+      >
+        <Select.Value />
+        <Select.Icon
+          style={{
+            width: 18,
+            height: 18,
+            display: 'grid',
+            placeItems: 'center',
+            opacity: 0.65,
+            flex: '0 0 auto',
+            marginRight: 2,
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true">
+            <path
+              d="M5 7l5 6 5-6"
+              fill="none"
+              stroke="rgba(0,0,0,0.55)"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </Select.Icon>
+      </Select.Trigger>
+
+      <Select.Portal>
+        <Select.Content
+          position="popper"
+          sideOffset={6}
+          style={{
+            zIndex: 9999,
+            background: 'rgba(255,255,255,0.98)',
+            borderRadius: 12,
+            border: '1px solid rgba(0,0,0,0.10)',
+            boxShadow: '0 14px 30px rgba(0,0,0,0.12)',
+            overflow: 'hidden',
+            backdropFilter: 'blur(8px)',
+            minWidth,
+          }}
+        >
+          <Select.Viewport style={{ padding: 6 }}>
+            {options.map((opt) => (
+              <Select.Item
+                key={opt.value}
+                value={opt.value}
+                style={{
+                  fontSize: 13,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  cursor: 'pointer',
+                  outline: 'none',
+                  userSelect: 'none',
+                }}
+              >
+                <Select.ItemText>{opt.label}</Select.ItemText>
+                <Select.ItemIndicator
+                  style={{
+                    width: 18,
+                    height: 18,
+                    display: 'grid',
+                    placeItems: 'center',
+                    opacity: 0.95,
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true">
+                    <path
+                      d="M4 10.5l3.2 3.2L16 5.8"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </Select.ItemIndicator>
+              </Select.Item>
+            ))}
+          </Select.Viewport>
+
+          <style jsx>{`
+            :global([role='option']) {
+              background: transparent;
+              color: rgba(0, 0, 0, 0.85);
+            }
+            :global([role='option'][data-highlighted]) {
+              background: rgba(0, 114, 49, 0.12);
+              color: rgba(0, 0, 0, 0.92);
+            }
+            :global([role='option'][data-state='checked']) {
+              background: #007231;
+              color: white;
+            }
+            :global([role='option'][data-state='checked'][data-highlighted]) {
+              background: #005a27;
+              color: white;
+            }
+          `}</style>
+        </Select.Content>
+      </Select.Portal>
+    </Select.Root>
+  );
+}
+
 /**
  * -------------------------
  * Main Page
@@ -2845,19 +3641,67 @@ const inputStyle: React.CSSProperties = {
  */
 
 export default function Home() {
+    const hasLoadedRef = useRef(false);
+
+  return (
+    <ReactFlowProvider>
+      <HomeInner />
+    </ReactFlowProvider>
+  );
+}
+function HomeInner() {
   const hasLoadedRef = useRef(false);
+const rfRef = useRef<any>(null);
+
+  const aliasSpawnLaneRef = useRef(0);
 
   const edgeMode = useGraph((s) => s.edgeMode);
   const setEdgeMode = useGraph((s) => s.setEdgeMode);
+  const edgeCornerRadius = useGraph((s) => s.edgeCornerRadius);
+
+  // Keep existing edges visually consistent when edge mode or corner radius changes.
+  useEffect(() => {
+    useGraph.setState((s: any) => {
+      const nextEdges = (s.edges ?? []).map((e: any) => {
+        const isRadius = s.edgeMode === 'radius';
+        const corner = s.edgeCornerRadius ?? 50;
+
+        const markerStart = e.markerStart
+          ? { ...e.markerStart, width: 12, height: 12 }
+          : undefined;
+        const markerEnd = e.markerEnd
+          ? { ...e.markerEnd, width: 12, height: 12 }
+          : e.markerStart
+          ? undefined
+          : { type: MarkerType.ArrowClosed, width: 12, height: 12 };
+
+        return {
+          ...e,
+          type: isRadius ? 'smoothstep' : 'default',
+          ...(isRadius ? { pathOptions: { ...(e.pathOptions ?? {}), borderRadius: corner } } : { pathOptions: undefined }),
+          style: { ...(e.style ?? {}), strokeWidth: 2 },
+          markerStart,
+          markerEnd,
+        };
+      });
+
+      return { edges: nextEdges };
+    });
+  }, [edgeMode, edgeCornerRadius]);
 
   const inspectorCollapsed = useGraph((s) => s.inspectorCollapsed);
   const toggleInspectorCollapsed = useGraph((s) => s.toggleInspectorCollapsed);
 
-  const [hoveredTop, setHoveredTop] = useState<'workflow' | 'timeline' | null>(null);
+  const ledgerCollapsed = useGraph((s) => s.ledgerCollapsed);
+  const toggleLedgerCollapsed = useGraph((s) => s.toggleLedgerCollapsed);
+
+  const [hoveredTop, setHoveredTop] = useState<'manager' | 'workflow' | 'reports' | null>(null);
 
   // Selection ids (declare ONCE)
   const selectedNodeId = useGraph((s) => s.selectedNodeId);
   const selectedEdgeId = useGraph((s) => s.selectedEdgeId);
+
+  const selectedMasterResourceId = useGraph((s) => s.selectedMasterResourceId);
 
   // Pull graph state/actions ONCE (must be above derived selection)
   const {
@@ -2865,20 +3709,28 @@ export default function Home() {
     setViewMode,
     nodes,
     edges,
+    masterResources,
     addPerson,
     addCapacity,
     addProject,
     addBudget,
     addTimeline,
     addTurnover,
+    spawnAliasFromMaster,
     addLedger,
     onConnect,
     onNodesChange,
     onEdgesChange,
     selectNode,
     selectEdge,
+    selectMasterResource,
+    addMasterResource,
+    deleteMasterResource,
+    updateMasterResourceTitle,
+    updateMasterResourceMeta,
     updateNodeTitle,
     updatePersonMeta,
+    updateAliasMeta,
     updateProjectStudio,
     updateProjectClient,
     updateBudgetPhases,
@@ -2889,6 +3741,73 @@ export default function Home() {
     hydrateFromPersisted,
     resetGraph,
   } = useGraph();
+
+  const getAliasAssignedProjectId = useCallback(
+    (aliasId: string): string | null => {
+      const edge = edges.find((e) => {
+        if (e.source !== aliasId) return false;
+        const tk = getNodeKindById(nodes, e.target);
+        const isAssignment = (e.data as any)?.edgeType === 'assignment';
+        return tk === 'project' && isAssignment;
+      });
+      return edge?.target ?? null;
+    },
+    [nodes, edges]
+  );
+
+  const getProjectConnectedBudgets = useCallback(
+    (projectId: string) => {
+      const budgetIds = edges
+        .filter((e) => e.source === projectId && getNodeKindById(nodes, e.target) === 'budget')
+        .map((e) => e.target);
+      return nodes
+        .filter((n) => budgetIds.includes(n.id) && n.data.kind === 'budget')
+        .map((n) => ({ id: n.id, title: (n.data as BudgetData).title }));
+    },
+    [nodes, edges]
+  );
+
+  const getProjectConnectedTimelines = useCallback(
+    (projectId: string) => {
+      const timelineIds = edges
+        .filter((e) => e.source === projectId && getNodeKindById(nodes, e.target) === 'timeline')
+        .map((e) => e.target);
+      return nodes
+        .filter((n) => timelineIds.includes(n.id) && n.data.kind === 'timeline')
+        .map((n) => ({ id: n.id, title: (n.data as TimelineData).title }));
+    },
+    [nodes, edges]
+  );
+
+  const spawnAliasAndFocus = useCallback(
+    (masterId: string) => {
+      const rf = rfRef.current;
+
+      const lane = aliasSpawnLaneRef.current++;
+      const screenX = window.innerWidth - (HUD_PAD + RIGHT_RAIL_W + 32) - 180;
+      const screenY = 160 + (lane % 7) * 58;
+
+      const toFlow = rf?.screenToFlowPosition
+        ? rf.screenToFlowPosition({ x: screenX, y: screenY })
+        : rf?.project
+        ? rf.project({ x: screenX, y: screenY })
+        : { x: 420, y: 260 + (lane % 7) * 58 };
+
+      const newId = spawnAliasFromMaster(masterId, { x: toFlow.x, y: toFlow.y });
+
+      setViewMode('workflow');
+      selectMasterResource(null);
+      selectNode(newId);
+
+      requestAnimationFrame(() => {
+        const inst = rfRef.current;
+        if (!inst?.setCenter) return;
+        const curZoom = inst.getViewport?.().zoom ?? 1;
+        inst.setCenter(toFlow.x, toFlow.y, { zoom: Math.max(curZoom, 0.95), duration: 220 });
+      });
+    },
+    [spawnAliasFromMaster, setViewMode, selectMasterResource, selectNode]
+  );
 
   // Inspector sizing refs/state
 const inspectorWrapRef = useRef<HTMLDivElement | null>(null);
@@ -2912,12 +3831,121 @@ const selectedNode = useMemo(
   [nodes, selectedNodeId]
 );
 
+const selectedMasterResource = useMemo(
+  () => masterResources.find((r) => r.id === selectedMasterResourceId) ?? null,
+  [masterResources, selectedMasterResourceId]
+);
+
+const masterCompIsExternal = selectedMasterResource?.compModel === 'External';
+const disabledInputStyle: React.CSSProperties = {
+  opacity: 0.45,
+};
+
+const isManager = viewMode === 'manager';
+
+const managerProjectNodes = useMemo(
+  () => nodes.filter((n) => n.data.kind === 'project'),
+  [nodes]
+);
+
+// Ledger HUD rollup (keep deterministic logic identical to LedgerNode)
+const ledgerSums = useMemo(() => {
+  const allBudgetIds = nodes
+    .filter((n) => n.data.kind === 'budget')
+    .map((n) => n.id);
+
+  return allBudgetIds.reduce(
+    (acc, nodeId) => {
+      const calc = computeBudgetNetForBudgetNode(nodes, edges, nodeId);
+      if (!calc) return acc;
+
+      acc.grossTotal += safeNum(calc.grossTotal);
+      acc.netTotal += safeNum(calc.netTotal);
+
+      acc.netDesign += safeNum(calc.net.design);
+      acc.netDev += safeNum(calc.net.dev);
+      acc.netOps += safeNum(calc.net.ops);
+
+      acc.debitsTotal += safeNum(calc.debits?.total);
+      acc.debitsCount += calc.debits?.lines?.length ?? 0;
+
+      return acc;
+    },
+    {
+      grossTotal: 0,
+      netTotal: 0,
+      netDesign: 0,
+      netDev: 0,
+      netOps: 0,
+      debitsTotal: 0,
+      debitsCount: 0,
+    }
+  );
+}, [nodes, edges]);
+
+const ledgerOverruns = useMemo(() => {
+  const overrunDesign = Math.min(0, ledgerSums.netDesign);
+  const overrunDev = Math.min(0, ledgerSums.netDev);
+  const overrunOps = Math.min(0, ledgerSums.netOps);
+  const overrunTotal = overrunDesign + overrunDev + overrunOps;
+  const hasOverrun = overrunTotal < 0;
+  return { overrunDesign, overrunDev, overrunOps, overrunTotal, hasOverrun };
+}, [ledgerSums]);
+
+// Manager panel sizing — keep a mirrored "virtual" rail on the left (same width/padding
+// as the Inspector rail) so Office Manager sits centered and reveals more dimmed canvas.
+// Optional polish: clamp the virtual rail so the panel remains usable on smaller screens.
+const HUD_PAD = 32;
+const RIGHT_RAIL_W = 300; // Inspector width (real)
+const LEFT_RAIL_W = 300;  // Virtual mirror of Inspector (do NOT render)
+const RAIL_GAP = 14;
+
+// Ledger HUD measurement (so Inspector can snap underneath it)
+const ledgerHudRef = useRef<HTMLDivElement | null>(null);
+const [ledgerHudHeight, setLedgerHudHeight] = useState<number>(0);
+
+useLayoutEffect(() => {
+  const el = ledgerHudRef.current;
+  if (!el) return;
+
+  const measure = () => {
+    const h = el.getBoundingClientRect().height;
+    if (Number.isFinite(h)) setLedgerHudHeight(h);
+  };
+
+  measure();
+
+  const ro = new ResizeObserver(() => measure());
+  ro.observe(el);
+
+  return () => ro.disconnect();
+}, [ledgerCollapsed]);
+
+const managerLeftInset = Math.min(HUD_PAD + LEFT_RAIL_W + RAIL_GAP, 420);
+const managerRightInset = HUD_PAD + RIGHT_RAIL_W + RAIL_GAP;
+
+const LEDGER_INSPECTOR_GAP = 32;
+const inspectorTop = HUD_PAD + ledgerHudHeight + LEDGER_INSPECTOR_GAP;
+
+// Manager-only overlay state (expanded card that obscures a list column)
+const [managerResourceCardId, setManagerResourceCardId] = useState<string | null>(null);
+
+useEffect(() => {
+  // leaving Manager should close overlays
+  if (!isManager) {
+    setManagerResourceCardId(null);
+    // master resources are a Manager concept; reset selection when exiting
+    selectMasterResource(null);
+  }
+}, [isManager]);
+
+
 const selectedEdge = useMemo(
   () => edges.find((e) => e.id === selectedEdgeId) ?? null,
   [edges, selectedEdgeId]
 );
 
-const hasSelection = !!selectedNode || !!selectedEdge;
+const hasSelection = !!selectedNode || !!selectedEdge || !!selectedMasterResource;
 
 // ✅ Snap transition + mute ResizeObserver while returning to baseline
 useEffect(() => {
@@ -3010,6 +4038,7 @@ useEffect(() => {
   INSPECTOR_BASELINE,
   selectedNodeId,
   selectedEdgeId,
+  selectedMasterResourceId,
 ]);
 
   const BTN_H = 30;
@@ -3084,35 +4113,75 @@ useEffect(() => {
    * Intercept wheel events inside the flow shell and preventDefault on any horizontal intent.
    */
   useEffect(() => {
-    const handler = (e: WheelEvent) => {
-      // pinch-zoom often reports ctrlKey — do not interfere
-      if (e.ctrlKey) return;
+  const handler = (e: WheelEvent) => {
+    const shell = flowShellRef.current;
+    const rf = rfRef.current;
+    if (!shell || !rf) return;
 
-      const shell = flowShellRef.current;
-      if (!shell) return;
+    const target = e.target as HTMLElement | null;
+    if (!target || !shell.contains(target)) return;
 
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
+    // Don't hijack wheel inside interactive UI (inspector, selects, inputs, etc.)
+    const inUi =
+      !!target.closest(
+        'input, textarea, select, option, button, [role="listbox"], [role="option"], [data-radix-popper-content-wrapper], [data-radix-select-content], .inspectorBody'
+      );
+    if (inUi) return;
 
-      // Only intercept events that originate inside the flow shell
-      if (!shell.contains(target)) return;
+    // pinch-zoom often reports ctrlKey — let the browser / OS handle it
+    if (e.ctrlKey) return;
 
-      // Any horizontal delta or shift+wheel counts as horizontal intent
-      if (e.deltaX !== 0 || e.shiftKey) {
-        e.preventDefault();
-      }
-    };
+    // Horizontal intent => prevent browser swipe nav (Mac)
+    if (e.deltaX !== 0 || e.shiftKey) {
+      e.preventDefault();
+      return;
+    }
 
-    window.addEventListener('wheel', handler, { capture: true, passive: false });
+    // Normalize delta
+    const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY; // lines -> px
+    const abs = Math.abs(delta);
 
-    return () => {
-      window.removeEventListener('wheel', handler as any, { capture: true } as any);
-    };
-  }, []);
+    // Magic Mouse + smooth wheels can be < 24 often. So:
+    // - treat "tiny" deltas as trackpad pan
+    // - treat "meaningful" deltas as mouse zoom
+    const TRACKPAD_LIKE = abs < 8;          // very tiny = trackpad pan
+    const MOUSE_LIKE = abs >= 8;            // magic mouse/wheel zoom
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+    if (TRACKPAD_LIKE) {
+      // let ReactFlow panOnScroll handle it
+      return;
+    }
+
+    // Mouse-like: take over and zoom
+    e.preventDefault();
+
+    const rect = shell.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const { x, y, zoom } = rf.getViewport();
+
+    const intensity = 0.0016; // tune 0.0012–0.0020
+    const factor = Math.exp(-delta * intensity);
+    const nextZoom = Math.min(2.5, Math.max(0.05, zoom * factor));
+
+    // cursor-anchored zoom
+    const worldX = (mouseX - x) / zoom;
+    const worldY = (mouseY - y) / zoom;
+
+    const nextX = mouseX - worldX * nextZoom;
+    const nextY = mouseY - worldY * nextZoom;
+
+    rf.setViewport({ x: nextX, y: nextY, zoom: nextZoom }, { duration: 0 });
+  };
+
+  window.addEventListener('wheel', handler, { capture: true, passive: false });
+  return () => window.removeEventListener('wheel', handler as any, { capture: true } as any);
+}, []);
+
+useEffect(() => {
+  setMounted(true);
+}, []);
 
   useEffect(() => {
     setScrubWeek(initialWeek);
@@ -3148,6 +4217,7 @@ useEffect(() => {
     edgeMode,
     nodes,
     edges,
+    masterResources,
   };
 
   try {
@@ -3155,7 +4225,7 @@ useEffect(() => {
   } catch {
     // ignore
   }
-}, [nodes, edges, viewMode, edgeMode]);
+}, [nodes, edges, masterResources, viewMode, edgeMode]);
 
   // Explicit Save button
 const manualSave = useCallback(() => {
@@ -3166,6 +4236,7 @@ const manualSave = useCallback(() => {
     edgeMode,
     nodes,
     edges,
+    masterResources,
   };
 
   try {
@@ -3174,7 +4245,7 @@ const manualSave = useCallback(() => {
   } catch {
     alert('Save failed (storage error).');
   }
-}, [nodes, edges, viewMode, edgeMode]);
+}, [nodes, edges, masterResources, viewMode, edgeMode]);
 
   const exportJSON = useCallback(async () => {
   const payload: PersistedGraph = {
@@ -3184,12 +4255,13 @@ const manualSave = useCallback(() => {
     edgeMode,
     nodes,
     edges,
+    masterResources,
   };
 
   const text = JSON.stringify(payload, null, 2);
   
   // ...rest of your export code
-}, [nodes, edges, viewMode, edgeMode]);
+}, [nodes, edges, masterResources, viewMode, edgeMode]);
 
   const importJSON = useCallback(() => {
     const raw = prompt('Paste JSON export:');
@@ -3237,11 +4309,56 @@ const manualSave = useCallback(() => {
   );
 
   const wiredNodes = useMemo(() => nodes.map((n) => ({ ...n, type: reactFlowTypeForNode(n.data.kind) })), [nodes, edges, scrubDate]);
+
+  // Project filing: when a project is collapsed, hide its directly connected alias/budget/timeline nodes + edges (visual-only)
+  const hiddenNodeIds = useMemo(() => {
+    const collapsed = new Set(
+      nodes
+        .filter((n) => n.data.kind === 'project' && Boolean((n.data as any).treeCollapsed))
+        .map((n) => n.id)
+    );
+
+    const hidden = new Set();
+    if (collapsed.size === 0) return hidden;
+
+    for (const e of edges) {
+      // Hide aliases assigned to this project
+      if (e.type === 'assignment' && e.target && collapsed.has(e.target)) {
+        const src = nodes.find((n) => n.id === e.source);
+        if (src && src.data && src.data.kind === 'alias') hidden.add(e.source);
+      }
+
+      // Hide budgets/timelines directly connected from the project
+      if (e.source && collapsed.has(e.source) && (e.sourceHandle === 'budget' || e.sourceHandle === 'timeline')) {
+        const tgt = nodes.find((n) => n.id === e.target);
+        if (tgt && tgt.data && (tgt.data.kind === 'budget' || tgt.data.kind === 'timeline')) hidden.add(e.target);
+      }
+    }
+
+    return hidden;
+  }, [nodes, edges]);
+
 const displayNodes = useMemo(() => {
   const FADED = 0.15;
   const SOFT = 0.45;
   const FULL = 1;
   const PAD_DAYS = 14;
+
+  function applyHidden(n: any) {
+    return {
+      ...n,
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      style: {
+        ...(n.style || {}),
+        opacity: 0,
+        pointerEvents: 'none',
+        transition: 'opacity 160ms ease',
+      },
+    };
+  }
+
 
   function addDays(d: Date, days: number) {
     const x = new Date(d);
@@ -3353,6 +4470,7 @@ const displayNodes = useMemo(() => {
 
   return wiredNodes.map((n) => {
     const kind = n.data?.kind;
+    const isHidden = kind !== 'project' && hiddenNodeIds.has(n.id);
 
     // Inject dock flags (visual-only). Non-dockables get null.
     const dock =
@@ -3361,33 +4479,47 @@ const displayNodes = useMemo(() => {
         : null;
 
     // always solid
-    if (kind === 'person' || kind === 'capacity') {
-      return dock ? { ...n, data: { ...(n.data as any), dock } } : n;
+    if (kind === 'person' || kind === 'alias' || kind === 'capacity') {
+      const base = dock ? { ...n, data: { ...(n.data as any), dock } } : n;
+      return isHidden ? applyHidden(base) : base;
     }
     if (String(kind).includes('turnover')) {
-      return dock ? { ...n, data: { ...(n.data as any), dock } } : n;
+      const base = dock ? { ...n, data: { ...(n.data as any), dock } } : n;
+      return isHidden ? applyHidden(base) : base;
     }
 
     if (kind === 'project') {
       const op = opacityForProject(n.id);
       const next = { ...n, style: { ...(n.style || {}), opacity: op } };
-      return dock ? { ...next, data: { ...(next.data as any), dock } } : next;
+      const base = dock ? { ...next, data: { ...(next.data as any), dock } } : next;
+      return isHidden ? applyHidden(base) : base;
     }
 
     if (kind === 'budget' || kind === 'timeline') {
       const pid = ownerProjectId(n.id);
       const op = pid ? opacityForProject(pid) : FULL;
 
-      return {
+      const base = {
         ...n,
         data: { ...(n.data as any), dock },
         style: { ...(n.style || {}), opacity: op },
       };
+      return isHidden ? applyHidden(base) : base;
     }
 
-    return dock ? { ...n, data: { ...(n.data as any), dock } } : n;
+    const base = dock ? { ...n, data: { ...(n.data as any), dock } } : n;
+      return isHidden ? applyHidden(base) : base;
   });
 }, [wiredNodes, nodes, edges, scrubDate]);
+
+const displayEdges = useMemo(() => {
+  if (!hiddenNodeIds || hiddenNodeIds.size === 0) return edges.map((e) => ({ ...e, hidden: false }));
+  return edges.map((e) => {
+    const hide = hiddenNodeIds.has(e.source) || hiddenNodeIds.has(e.target);
+    return hide ? ({ ...e, hidden: true }) : ({ ...e, hidden: false });
+  });
+}, [edges, hiddenNodeIds]);
+
 
 const isValidConnection = useCallback(
   (c: Connection) => isValidConnectionStrict(nodes, c),
@@ -3438,9 +4570,7 @@ const masterTimelineItems = useMemo(() => {
   }}
 >
 
-
-
-    <button
+<button
   onClick={() => setViewMode('workflow')}
   onMouseEnter={() => setHoveredTop('workflow')}
   onMouseLeave={() => setHoveredTop(null)}
@@ -3466,8 +4596,8 @@ const masterTimelineItems = useMemo(() => {
 </button>
 
 <button
-  onClick={() => setViewMode('timeline')}
-  onMouseEnter={() => setHoveredTop('timeline')}
+  onClick={() => setViewMode('manager')}
+  onMouseEnter={() => setHoveredTop('manager')}
   onMouseLeave={() => setHoveredTop(null)}
   style={{
     ...pillBtn,
@@ -3475,14 +4605,39 @@ const masterTimelineItems = useMemo(() => {
     border: '0.75px solid rgba(0,114,49,0.85)',
 
     background:
-      viewMode === 'timeline'
+      viewMode === 'manager'
         ? '#005a27'
-        : hoveredTop === 'timeline'
+        : hoveredTop === 'manager'
         ? '#007231'
         : 'rgba(255,255,255,0.92)',
 
     color:
-      viewMode === 'timeline' || hoveredTop === 'timeline'
+      viewMode === 'manager' || hoveredTop === 'manager'
+        ? 'white'
+        : 'rgba(0,114,49,0.85)',
+  }}
+>
+  Manager
+</button>
+
+<button
+  onClick={() => setViewMode('reports')}
+  onMouseEnter={() => setHoveredTop('reports')}
+  onMouseLeave={() => setHoveredTop(null)}
+  style={{
+    ...pillBtn,
+    borderRadius: 999,
+    border: '0.75px solid rgba(0,114,49,0.85)',
+
+    background:
+      viewMode === 'reports'
+        ? '#005a27'
+        : hoveredTop === 'reports'
+        ? '#007231'
+        : 'rgba(255,255,255,0.92)',
+
+    color:
+      viewMode === 'reports' || hoveredTop === 'reports'
         ? 'white'
         : 'rgba(0,114,49,0.85)',
   }}
@@ -3494,6 +4649,7 @@ const masterTimelineItems = useMemo(() => {
   </div>
 
   {/* LEFT: Edge + Save/I-O/Reset (vertical stack) */}
+{viewMode === 'workflow' && (
 <div
   style={{
     position: 'absolute',
@@ -3685,7 +4841,10 @@ const masterTimelineItems = useMemo(() => {
   </button>
 </div>
 
+)}
+
   {/* BOTTOM: Add nodes only (replaces scrubber space) */}
+{viewMode === 'workflow' && (
 <div
   style={{
     position: 'absolute',
@@ -3740,16 +4899,152 @@ const masterTimelineItems = useMemo(() => {
 
     return (
       <>
-        <ActionPill label="+ Resource" onClick={addPerson} />
+        <ActionPill label="+ Resource" onClick={() => setViewMode('manager')} />
         <ActionPill label="+ Project" onClick={addProject} />
         <ActionPill label="+ Budget" onClick={addBudget} />
         <ActionPill label="+ Timeline" onClick={addTimeline} />
-        <ActionPill label="+ Ledger" onClick={addLedger} />
+        
       </>
     );
   })()}
 </div>
+)}
 </>
+
+{/* Ledger HUD (pinned, screen-space) */}
+<div
+  ref={ledgerHudRef}
+  style={{
+    position: 'absolute',
+    zIndex: 11,
+    top: HUD_PAD,
+    right: HUD_PAD,
+    width: 300,
+    // Collapsed is header-only; expanded grows with content but is capped to viewport.
+    height: ledgerCollapsed ? 52 : 'auto',
+    maxHeight: ledgerCollapsed ? 52 : 'calc(100vh - 64px)',
+    overflow: 'hidden',
+
+    background: 'rgba(255,255,255,0.92)',
+    padding: 15,
+    borderRadius: 10,
+    border: '1px solid rgba(0,0,0,0.08)',
+    boxShadow: '0 14px 30px rgba(0,0,0,0.08)',
+    backdropFilter: 'blur(6px)',
+
+    display: 'flex',
+    flexDirection: 'column',
+    transition: 'height 180ms ease, max-height 180ms ease',
+    transformOrigin: 'top right',
+  }}
+>
+  <div
+    style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+    }}
+  >
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontWeight: 500, fontSize: 13, lineHeight: 1.1 }}>Ledger</div>
+      {!ledgerCollapsed && (
+        <div style={{ opacity: 0.6, fontSize: 12, marginTop: 2 }}>Totals across all budgets.</div>
+      )}
+    </div>
+
+    <BureauToggle on={!ledgerCollapsed} onToggle={toggleLedgerCollapsed} label="" />
+  </div>
+
+  <div style={{ height: 10 }} />
+
+  {ledgerCollapsed ? (
+    <div style={{ flex: 1 }} />
+  ) : (
+    <div
+      style={{
+        flex: 1,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        paddingBottom: 10,
+        paddingRight: 2,
+        minHeight: 0,
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
+      }}
+    >
+      <div style={{ display: 'flex', gap: 14 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, opacity: 0.65 }}>Gross</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{formatEUR(ledgerSums.grossTotal)}</div>
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, opacity: 0.65 }}>Net</div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{formatEUR(ledgerSums.netTotal)}</div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, display: 'grid', gap: 6 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+          <span style={{ opacity: 0.7 }}>Net Design</span>
+          <span style={{ fontWeight: 650 }}>{formatEUR(ledgerSums.netDesign)}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+          <span style={{ opacity: 0.7 }}>Net Dev</span>
+          <span style={{ fontWeight: 650 }}>{formatEUR(ledgerSums.netDev)}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+          <span style={{ opacity: 0.7 }}>Net Ops</span>
+          <span style={{ fontWeight: 650 }}>{formatEUR(ledgerSums.netOps)}</span>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginTop: 6 }}>
+          <span style={{ opacity: 0.7 }}>Debits</span>
+          <span style={{ fontWeight: 650 }}>
+            {formatEUR(ledgerSums.debitsTotal)}{' '}
+            <span style={{ opacity: 0.55 }}>({ledgerSums.debitsCount})</span>
+          </span>
+        </div>
+
+        {ledgerOverruns.hasOverrun && (
+          <div
+            style={{
+              marginTop: 8,
+              paddingTop: 8,
+              borderTop: '1px solid rgba(0,0,0,0.08)',
+              display: 'grid',
+              gap: 4,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+              <span style={{ opacity: 0.7 }}>Overrun (Total)</span>
+              <span style={{ fontWeight: 650 }}>{formatEUR(ledgerOverruns.overrunTotal)}</span>
+            </div>
+            {ledgerOverruns.overrunDesign < 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ opacity: 0.7 }}>Overrun Design</span>
+                <span style={{ fontWeight: 650 }}>{formatEUR(ledgerOverruns.overrunDesign)}</span>
+              </div>
+            )}
+            {ledgerOverruns.overrunDev < 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ opacity: 0.7 }}>Overrun Dev</span>
+                <span style={{ fontWeight: 650 }}>{formatEUR(ledgerOverruns.overrunDev)}</span>
+              </div>
+            )}
+            {ledgerOverruns.overrunOps < 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                <span style={{ opacity: 0.7 }}>Overrun Ops</span>
+                <span style={{ fontWeight: 650 }}>{formatEUR(ledgerOverruns.overrunOps)}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )}
+</div>
+
 {/* Inspector */}
 <div
   ref={inspectorWrapRef}
@@ -3758,9 +5053,9 @@ const masterTimelineItems = useMemo(() => {
     zIndex: 10,
     right: 32,
 
-    // always vertically centered on the right rail
-    top: '50%',
-    transform: 'translateY(-50%)',
+    // snapped under the Ledger HUD
+    top: inspectorTop,
+    transform: 'none',
 
     width: 300, // constant width
 
@@ -3822,7 +5117,7 @@ const masterTimelineItems = useMemo(() => {
     </div>
   ) : (
     <div
-  key={`${selectedNodeId ?? 'none'}:${selectedEdgeId ?? 'none'}`}
+  key={`${selectedNodeId ?? 'none'}:${selectedEdgeId ?? 'none'}:${selectedMasterResourceId ?? 'none'}`}
   ref={inspectorBodyRef}
   style={{
     // ✅ critical: don't force tall body unless we're at max
@@ -3837,50 +5132,191 @@ const masterTimelineItems = useMemo(() => {
         msOverflowStyle: 'none',
       }}
     >
-      {/* Selected NODE */}
-      {selectedNode && (
+
+      {/* Selected MASTER RESOURCE */}
+      {selectedMasterResource && (
         <div style={{ marginTop: 6 }}>
-          <div style={{ fontWeight: 650, fontSize: 12 }}>
-            {String((selectedNode.data as any)?.kind ?? '').toUpperCase()} Node
-          </div>
+          <div style={{ fontWeight: 650, fontSize: 12 }}>MASTER RESOURCE</div>
 
           <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
-            {(selectedNode.data as any).kind === 'project' ? 'Project name' : 'Title'}
+            Resource Name
             <input
               style={inputStyle}
-              value={String((selectedNode.data as any).title ?? '')}
-              onChange={(e) => updateNodeTitle(selectedNode.id, e.target.value)}
+              value={selectedMasterResource.title}
+              onChange={(e) => updateMasterResourceTitle(selectedMasterResource.id, e.target.value)}
             />
           </label>
 
-          {(selectedNode.data as any).kind === 'person' && (
-            <>
-              <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ fontSize: 12, opacity: 0.75 }}>Dept</div>
-                <span
-                  style={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: 999,
-                    background: (selectedNode.data as any).color,
-                    border: '1px solid rgba(0,0,0,0.08)',
-                  }}
-                />
-                <div style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>
-                  {deptLabel((selectedNode.data as any).dept)}
-                </div>
-              </div>
+          {/* Entity */}
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Entity</div>
+            <div style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>
+              {selectedMasterResource.entity}
+            </div>
+          </div>
 
-              <select
-                style={{ ...inputStyle, marginTop: 6 }}
-                value={(selectedNode.data as any).dept}
-                onChange={(e) => updatePersonMeta(selectedNode.id, { dept: e.target.value as Dept })}
-              >
-                <option value="unassigned">Unassigned</option>
-                <option value="ops">Operations</option>
-                <option value="design">Design</option>
-                <option value="dev">Engineering</option>
-              </select>
+          <InspectorSelect
+            value={String(selectedMasterResource.entity)}
+            onValueChange={(v) => updateMasterResourceMeta(selectedMasterResource.id, { entity: v as Studio })}
+            options={[
+              { value: 'Antinomy Studio', label: 'Antinomy Studio' },
+              { value: '27b', label: '27b' },
+            ]}
+          />
+
+          {/* Dept */}
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Dept</div>
+            <span
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 999,
+                background: selectedMasterResource.color,
+                border: '1px solid rgba(0,0,0,0.08)',
+              }}
+            />
+            <div style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>
+              {deptLabel(selectedMasterResource.dept)}
+            </div>
+          </div>
+
+          {/* Dept */}
+          <InspectorSelect
+            value={String(selectedMasterResource.dept)}
+            onValueChange={(v) => updateMasterResourceMeta(selectedMasterResource.id, { dept: v as Dept })}
+            options={[
+              { value: 'unassigned', label: 'Unassigned' },
+              { value: 'ops', label: 'Operations' },
+              { value: 'design', label: 'Design' },
+              { value: 'dev', label: 'Engineering' },
+            ]}
+          />
+
+          {/* Comp model (dropdown) */}
+          <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Comp model</div>
+          <InspectorSelect
+            value={String(selectedMasterResource.compModel)}
+            onValueChange={(v) => updateMasterResourceMeta(selectedMasterResource.id, { compModel: v as any })}
+            options={[
+              { value: 'Full time', label: 'Full time' },
+              { value: 'External', label: 'External' },
+            ]}
+          />
+
+          {/* Contract */}
+          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <label style={{ display: 'block', fontSize: 12, opacity: 0.85 }}>
+              Contract start
+              <input
+                style={{
+                  ...inputStyle,
+                  ...(masterCompIsExternal ? disabledInputStyle : null),
+                }}
+                type="date"
+                value={selectedMasterResource.contractStartISO}
+                onChange={(e) => updateMasterResourceMeta(selectedMasterResource.id, { contractStartISO: e.target.value })}
+                disabled={masterCompIsExternal}
+              />
+            </label>
+            <label style={{ display: 'block', fontSize: 12, opacity: 0.85 }}>
+              Contract end
+              <input
+                style={{
+                  ...inputStyle,
+                  ...(masterCompIsExternal ? disabledInputStyle : null),
+                }}
+                type="date"
+                value={selectedMasterResource.contractEndISO}
+                onChange={(e) => updateMasterResourceMeta(selectedMasterResource.id, { contractEndISO: e.target.value })}
+                disabled={masterCompIsExternal}
+              />
+            </label>
+          </div>
+
+          {/* Salary / rate */}
+          <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <label style={{ display: 'block', fontSize: 12, opacity: 0.85 }}>
+              Salary annual
+              <input
+                style={{
+                  ...inputStyle,
+                  ...(masterCompIsExternal ? disabledInputStyle : null),
+                }}
+                type="number"
+                value={Number(selectedMasterResource.salaryAnnual ?? 0)}
+                onChange={(e) => updateMasterResourceMeta(selectedMasterResource.id, { salaryAnnual: Number(e.target.value) })}
+                disabled={masterCompIsExternal}
+              />
+            </label>
+            <label style={{ display: 'block', fontSize: 12, opacity: 0.85 }}>
+              Bill rate (€/h)
+              <input
+                style={{
+                  ...inputStyle,
+                  ...(masterCompIsExternal ? disabledInputStyle : null),
+                }}
+                type="number"
+                value={Number(selectedMasterResource.billRatePerHour ?? 0)}
+                onChange={(e) => updateMasterResourceMeta(selectedMasterResource.id, { billRatePerHour: Number(e.target.value) })}
+                disabled={masterCompIsExternal}
+              />
+            </label>
+          </div>
+
+         
+          
+        </div>
+      )}
+
+      {/* Selected NODE */}
+{selectedNode && (
+  <div style={{ marginTop: 6 }}>
+    {(selectedNode.data as any)?.kind !== 'alias' && (
+      <div style={{ fontWeight: 650, fontSize: 12 }}>
+        {String((selectedNode.data as any)?.kind ?? '').toUpperCase()} Node
+      </div>
+    )}
+
+    {(selectedNode.data as any).kind !== 'alias' && (
+      <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: 0.8 }}>
+        {(selectedNode.data as any).kind === 'project' ? 'Project name' : 'Title'}
+        <input
+          style={inputStyle}
+          value={String((selectedNode.data as any).title ?? '')}
+          onChange={(e) => updateNodeTitle(selectedNode.id, e.target.value)}
+        />
+      </label>
+    )}
+
+    {(selectedNode.data as any).kind === 'person' && (
+      <>
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>Dept</div>
+          <span
+            style={{
+              width: 12,
+              height: 12,
+              borderRadius: 999,
+              background: (selectedNode.data as any).color,
+              border: '1px solid rgba(0,0,0,0.08)',
+            }}
+          />
+          <div style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>
+            {deptLabel((selectedNode.data as any).dept)}
+          </div>
+        </div>
+
+              <InspectorSelect
+                value={String((selectedNode.data as any).dept)}
+                onValueChange={(v) => updatePersonMeta(selectedNode.id, { dept: v as Dept })}
+                options={[
+                  { value: 'unassigned', label: 'Unassigned' },
+                  { value: 'ops', label: 'Operations' },
+                  { value: 'design', label: 'Design' },
+                  { value: 'dev', label: 'Engineering' },
+                ]}
+              />
 
               <label style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, fontSize: 12 }}>
                 <input
@@ -3972,11 +5408,159 @@ const masterTimelineItems = useMemo(() => {
             </>
           )}
 
+          {(selectedNode.data as any).kind === 'alias' && (
+  <>
+    {(() => {
+      const a = selectedNode.data as AliasData;
+
+      const mr = masterResources.find((r) => r.id === a.masterResourceId) ?? null;
+      const resourceName = String((mr as any)?.name ?? (mr as any)?.title ?? '').trim() || 'Resource';
+
+      const projectId = getAliasAssignedProjectId(selectedNode.id);
+      const projectTitle = projectId
+        ? ((nodes.find((n) => n.id === projectId)?.data as any)?.title ?? 'Project')
+        : null;
+
+      const connectedBudgets = projectId ? getProjectConnectedBudgets(projectId) : [];
+      const connectedTimelines = projectId ? getProjectConnectedTimelines(projectId) : [];
+
+      // Master defines Dept + Comp model (alias can carry linkage/finance only)
+      const dept = ((mr as any)?.dept ?? a.dept) as Dept;
+      const color = String((mr as any)?.color ?? (a as any).color ?? DEPT_COLOURS.unassigned);
+      const compModel = (((mr as any)?.compModel ?? (a as any).compModel) as 'Full time' | 'External') || 'Full time';
+
+      return (
+        <>
+          {/* Header: resource name (uneditable, master truth) */}
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 18, lineHeight: 1.1 }}>{resourceName}</div>
+            <div style={{ marginTop: 4, fontSize: 12, opacity: 0.55 }}>Assignment</div>
+          </div>
+
+          {/* Dept (display only) */}
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Dept</div>
+            <span
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: 999,
+                background: color,
+                border: '1px solid rgba(0,0,0,0.08)',
+              }}
+            />
+            <div style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>{deptLabel(dept)}</div>
+          </div>
+
+          {/* Comp model (display only) */}
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 12, opacity: 0.75 }}>Comp model</div>
+            <div style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.7 }}>{compModel}</div>
+          </div>
+
+          {/* Assigned project */}
+          <div style={{ marginTop: 12, fontSize: 12, opacity: 0.75 }}>
+            Assigned project
+            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.6 }}>
+              {projectTitle ? projectTitle : 'Connect this alias to a project'}
+            </div>
+          </div>
+
+          {/* External: fee + bill to budget (scoped) */}
+          {compModel === 'External' ? (
+            <>
+              <div style={{ marginTop: 12, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Fee</div>
+              <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <label style={{ display: 'block', fontSize: 12, opacity: 0.85 }}>
+                  Mode
+                  <select
+                    style={inputStyle}
+                    value={String((a as any).feeMode)}
+                    onChange={(e) => updateAliasMeta(selectedNode.id, { feeMode: e.target.value as any })}
+                  >
+                    <option value="fixed">Fixed</option>
+                    <option value="dayRate">Day rate</option>
+                  </select>
+                </label>
+                <label style={{ display: 'block', fontSize: 12, opacity: 0.85 }}>
+                  Amount (€)
+                  <input
+                    style={inputStyle}
+                    type="number"
+                    value={Number((a as any).feeValueEUR ?? 0)}
+                    onChange={(e) => updateAliasMeta(selectedNode.id, { feeValueEUR: Number(e.target.value) })}
+                  />
+                </label>
+              </div>
+
+              <div style={{ marginTop: 12, fontWeight: 650, fontSize: 12, opacity: 0.85 }}>
+                Bill to budget
+              </div>
+              <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: projectId ? 0.9 : 0.45 }}>
+                Budget
+                <select
+                  style={inputStyle}
+                  disabled={!projectId}
+                  value={String((a as any).billToBudgetId ?? '')}
+                  onChange={(e) =>
+                    updateAliasMeta(selectedNode.id, { billToBudgetId: e.target.value ? e.target.value : null })
+                  }
+                >
+                  <option value="">Unassigned</option>
+                  {connectedBudgets.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!projectId && (
+                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.55 }}>
+                  Connect resource alias → project to scope budgets.
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Full time: link to timeline (scoped) */}
+              <div style={{ marginTop: 12, fontWeight: 650, fontSize: 12, opacity: 0.85 }}>
+                Link to timeline
+              </div>
+              <label style={{ display: 'block', marginTop: 10, fontSize: 12, opacity: projectId ? 0.9 : 0.45 }}>
+                Timeline
+                <select
+                  style={inputStyle}
+                  disabled={!projectId}
+                  value={String((a as any).linkToTimelineId ?? '')}
+                  onChange={(e) =>
+                    updateAliasMeta(selectedNode.id, { linkToTimelineId: e.target.value ? e.target.value : null })
+                  }
+                >
+                  <option value="">Unassigned</option>
+                  {connectedTimelines.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!projectId && (
+                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.55 }}>
+                  Connect resource alias → project to scope timelines.
+                </div>
+              )}
+            </>
+          )}
+        </>
+      );
+    })()}
+  </>
+)}
+
           {(selectedNode.data as any).kind === 'project' && (
             <>
               
 
-              <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Studio</div>
               <div style={{ marginTop: 10, fontSize: 12, fontWeight: 700, opacity: 0.7 }}>Studio</div>
 
 <Select.Root
@@ -4291,7 +5875,7 @@ const masterTimelineItems = useMemo(() => {
 
 
       {/* Views */}
-      {viewMode === 'timeline' ? (
+      {viewMode === 'reports' ? (
         <MasterTimeline items={masterTimelineItems} />
       ) : (
   <div style={{ position: 'relative', height: '100%', width: '100%' }}>
@@ -4397,31 +5981,625 @@ const masterTimelineItems = useMemo(() => {
   </button>
 </div>
 
+
+{isManager && (
+  <div
+    style={{
+      position: 'absolute',
+      zIndex: 9, // keep Inspector above
+      left: managerLeftInset,
+      right: managerRightInset, // dock up to Inspector rail (right) + virtual rail (left)
+      top: 96,
+      bottom: 32,
+      background: 'rgba(255,255,255,0.92)',
+      border: '1px solid rgba(0,0,0,0.08)',
+      borderRadius: 18,
+      boxShadow: '0 14px 30px rgba(0,0,0,0.08)',
+      backdropFilter: 'blur(6px)',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+    }}
+  >
+    {/* Header */}
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        padding: '14px 16px 12px 16px',
+        borderBottom: '1px solid rgba(255,255,255,0.22)',
+        background: BUREAU_GREEN,
+      }}
+    >
+      {/* Left slot reserved for future Manager controls */}
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: 18 }} />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <input
+          placeholder="Search…"
+          style={{ ...inputStyle, width: 220, marginTop: 0, background: 'white' }}
+        />
+      </div>
+    </div>
+
+    {/* Lens strip (placeholder MVP) */}
+    <div
+      style={{
+        padding: '10px 16px',
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 650, opacity: 0.75 }}>Timeline lens</div>
+      <div style={{ fontSize: 12, opacity: 0.55 }}>Scrub to focus projects and roster.</div>
+    </div>
+
+    {/* Body: two columns */}
+    <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', minHeight: 0 }}>
+      {/* Case Files column (placeholder) */}
+      <div style={{ borderRight: '1px solid rgba(0,0,0,0.06)', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.2, textTransform: 'uppercase', opacity: 0.75 }}>
+              Projects
+            </div>
+            <CountBadge n={managerProjectNodes.length} />
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 10px 10px 10px' }}>
+          {managerProjectNodes.length === 0 ? (
+            <div style={{ padding: 12, fontSize: 12, opacity: 0.55 }}>
+              No projects yet. Create your first project in Workflow.
+            </div>
+          ) : (
+            managerProjectNodes
+              .slice()
+              .sort((a, b) => String((a.data as any).title ?? '').localeCompare(String((b.data as any).title ?? '')))
+              .map((p) => (
+                <div
+                  key={p.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    // Quick jump back into canvas context for this project
+                    setViewMode('workflow');
+                    selectNode(p.id);
+                    selectEdge(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setViewMode('workflow');
+                      selectNode(p.id);
+                      selectEdge(null);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '12px 12px',
+                    borderRadius: 14,
+                    border: '1px solid rgba(0,0,0,0.08)',
+                    background: 'rgba(255,255,255,0.85)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    marginBottom: 10,
+                    userSelect: 'none',
+                  }}
+                  onPointerEnter={(e) => {
+                    const el = e.currentTarget as HTMLDivElement;
+                    el.style.background = 'rgba(0,114,49,0.08)';
+                    el.style.boxShadow = 'inset 0 -3px 0 0 rgba(0,114,49,0.65)';
+                  }}
+                  onPointerLeave={(e) => {
+                    const el = e.currentTarget as HTMLDivElement;
+                    el.style.background = 'rgba(255,255,255,0.85)';
+                    el.style.boxShadow = 'none';
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 999,
+                      background: BUREAU_GREEN,
+                      border: '1px solid rgba(0,0,0,0.10)',
+                      flex: '0 0 auto',
+                    }}
+                  />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 650,
+                        letterSpacing: -0.2,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {(p.data as any).title ?? 'Untitled project'}
+                    </div>
+                    <div style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }}>
+                      {(p.data as any).studio ?? 'Studio'}
+                      {String((p.data as any).client ?? '').trim() ? ` · ${(p.data as any).client}` : ''}
+                    </div>
+                  </div>
+                </div>
+              ))
+          )}
+        </div>
+      </div>
+
+      {/* Roster column */}
+      <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.2, textTransform: 'uppercase', opacity: 0.75 }}>
+              Resources
+            </div>
+            <CountBadge n={masterResources.length} />
+          </div>
+
+          <button
+            onClick={addMasterResource}
+            disabled={!!managerResourceCardId}
+            style={{
+              ...pillBtn,
+              borderColor: 'rgba(0,114,49,0.85)',
+              color: 'rgba(0,114,49,0.85)',
+              background: 'white',
+              padding: '7px 10px',
+              opacity: managerResourceCardId ? 0.35 : 1,
+              pointerEvents: managerResourceCardId ? 'none' : 'auto',
+            }}
+            onPointerEnter={(e) => {
+              if (managerResourceCardId) return;
+              const el = e.currentTarget as HTMLButtonElement;
+              el.style.background = '#007231';
+              el.style.color = 'white';
+              el.style.borderColor = '#007231';
+            }}
+            onPointerLeave={(e) => {
+              if (managerResourceCardId) return;
+              const el = e.currentTarget as HTMLButtonElement;
+              el.style.background = 'white';
+              el.style.color = 'rgba(0,114,49,0.85)';
+              el.style.borderColor = 'rgba(0,114,49,0.85)';
+            }}
+          >
+            + resource
+          </button>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+          {/* Expanded card overlay (obscures list) */}
+          {managerResourceCardId ? (() => {
+            const r = masterResources.find((x) => x.id === managerResourceCardId) ?? null;
+            if (!r) return null;
+
+            const orgActiveProjects = nodes.filter((n) => n.data.kind === 'project').length;
+            // System compute: active assignments = aliases for this master resource that are connected to a project via assignment edge.
+            const aliasIdsForResource = nodes
+              .filter((n) => n.data.kind === 'alias' && (n.data as any).masterResourceId === r.id)
+              .map((n) => n.id);
+
+            const activeAliasIds = new Set(
+              edges
+                .filter((e) => (e.data as any)?.edgeType === 'assignment')
+                .filter((e) => aliasIdsForResource.includes(e.source) && getNodeKindById(nodes, e.target) === 'project')
+                .map((e) => e.source)
+            );
+
+            const activeAssignments = activeAliasIds.size;
+
+            // MVP placeholder for history until we add completion tracking.
+            const completedProjects = 0;
+            const capLabel = activeAssignments > 0 ? 'In Motion' : 'Available';
+
+            const endingW = weeksUntil(r.contractEndISO);
+
+            const labelStyle: React.CSSProperties = {
+              fontFamily: 'var(--font-mono)',
+              fontSize: 12,
+              fontWeight: 400,
+              letterSpacing: 0.8,
+              textTransform: 'uppercase',
+              opacity: 0.72,
+              whiteSpace: 'nowrap',
+            };
+
+            const valueStyle: React.CSSProperties = {
+              fontSize: 16,
+              fontWeight: 400,
+              letterSpacing: -0.2,
+            };
+
+            const rowStyle: React.CSSProperties = {
+              display: 'grid',
+              gridTemplateColumns: '170px 1fr',
+              alignItems: 'baseline',
+              gap: 18,
+              marginTop: 5,
+            };
+
+            return (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  padding: 18,
+                  overflowY: 'auto',
+                }}
+              >
+                <div
+                  style={card({
+                    minHeight: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    background: '#fbfbfc',
+                    border: `1px solid ${BUREAU_GREEN}`,
+                    boxShadow: '0 8px 20px rgba(0,0,0,0.06), 0 0 0 2px rgba(0,114,49,0.06)',
+                    padding: 18,
+                  })}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      {/* Card title uses the resource name (no redundant "Resource" label) */}
+                      <div style={{ fontSize: 28, fontWeight: 900, letterSpacing: -0.4, lineHeight: 1.08 }}>
+                        {r.title}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => { setManagerResourceCardId(null); selectMasterResource(null); }}
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 999,
+                        border: '1px solid rgba(0,0,0,0.10)',
+                        background: 'rgba(255,255,255,0.85)',
+                        cursor: 'pointer',
+                        fontSize: 16,
+                        lineHeight: 1,
+                      }}
+                      aria-label="Close"
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div style={{ height: 18 }} />
+
+                  <div style={{ maxWidth: 560, marginLeft: 40 }}>
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>Entity</div>
+                      <div style={valueStyle}>{r.entity}</div>
+                    </div>
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>Dept</div>
+                      <div style={{ ...valueStyle, display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <span
+                          style={{
+                            width: 12,
+                            height: 12,
+                            borderRadius: 999,
+                            background: r.color,
+                            border: '1px solid rgba(0,0,0,0.08)',
+                            boxShadow: '0 6px 18px rgba(0,0,0,0.08)',
+                          }}
+                        />
+                        <span>{deptLabel(r.dept)}</span>
+                      </div>
+                    </div>
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>Comp model</div>
+                      <div style={valueStyle}>{r.compModel}</div>
+                    </div>
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>Contract period</div>
+                      <div style={valueStyle}>
+                        {isoToDMY(r.contractStartISO)} → {isoToDMY(r.contractEndISO)}
+                      </div>
+                    </div>{r.compModel !== 'External' && (
+
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>Ending in</div>
+                      <div style={{ ...valueStyle, display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <CountBadge n={Math.max(0, endingW)} />
+                        <span style={{ fontSize: 14, fontWeight: 400, opacity: 0.9 }}>weeks</span>
+                      </div>
+                    </div>
+
+)}
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>Salary annual</div>
+                      <div style={valueStyle}>€{Number(r.salaryAnnual ?? 0).toLocaleString()}</div>
+                    </div>
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>Bill rate</div>
+                      <div style={valueStyle}>
+                        {r.billRatePerHour ? `€${Number(r.billRatePerHour).toLocaleString()} p/h` : '—'}
+                      </div>
+                    </div>
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>Completed</div>
+                      <div style={{ ...valueStyle, display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <CountBadge n={completedProjects} />
+                        <span style={{ fontSize: 14, fontWeight: 400, opacity: 0.9 }}>projects</span>
+                      </div>
+                    </div>
+
+                    {/* Divider between history and capacity section */}
+                    <div style={{ marginTop: 16, borderTop: '1px solid rgba(0,0,0,0.10)' }} />
+
+                    <div style={{ height: 26 }} />
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>Capacity</div>
+                      <div style={valueStyle}>{capLabel}</div>
+                    </div>
+
+                    <div style={{ marginTop: 16, fontSize: 14, opacity: 0.85, lineHeight: 1.25 }}>
+                      Active assignments <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginLeft: 6 }}><CountBadge n={activeAssignments} /></span>
+                      <br />
+                      Active org projects <span style={{ fontWeight: 400 }}>{orgActiveProjects}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ flex: 1 }} />
+
+                  {/* Terminate (delete) master resource */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12 }}>
+                    <button
+                      onClick={() => {
+                        deleteMasterResource(r.id);
+                        setManagerResourceCardId(null);
+                        selectMasterResource(null);
+                      }}
+                      style={{
+                        ...pillBtn,
+                        borderColor: 'rgba(180,40,40,0.85)',
+                        color: 'rgba(180,40,40,0.90)',
+                        background: 'white',
+                        padding: '7px 10px',
+                      }}
+                      onPointerEnter={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement;
+                        el.style.background = 'rgba(180,40,40,1)';
+                        el.style.color = 'white';
+                        el.style.borderColor = 'rgba(180,40,40,1)';
+                      }}
+                      onPointerLeave={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement;
+                        el.style.background = 'white';
+                        el.style.color = 'rgba(180,40,40,0.90)';
+                        el.style.borderColor = 'rgba(180,40,40,0.85)';
+                      }}
+                    >
+                      - terminate
+                    </button>
+
+                    <button
+                      onClick={() => spawnAliasAndFocus(r.id)}
+                      style={{
+                        ...pillBtn,
+                        borderColor: 'rgba(0,114,49,0.85)',
+                        color: 'rgba(0,114,49,0.85)',
+                        background: 'white',
+                        padding: '7px 10px',
+                      }}
+                      onPointerEnter={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement;
+                        el.style.background = '#007231';
+                        el.style.color = 'white';
+                        el.style.borderColor = '#007231';
+                      }}
+                      onPointerLeave={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement;
+                        el.style.background = 'white';
+                        el.style.color = 'rgba(0,114,49,0.85)';
+                        el.style.borderColor = 'rgba(0,114,49,0.85)';
+                      }}
+                    >
+                      + assign
+                    </button>
+                  </div>
+
+                </div>
+              </div>
+            );
+          })() : (
+            <div style={{ height: '100%', overflowY: 'auto', padding: '0 10px 10px 10px' }}>
+              {masterResources.length === 0 ? (
+                <div style={{ padding: 12, fontSize: 12, opacity: 0.55 }}>
+                  No resources yet. Create your first master resource.
+                </div>
+              ) : (
+                masterResources.map((r) => {
+                  return (
+                  <div
+                    key={r.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      selectMasterResource(r.id);
+                      setManagerResourceCardId(r.id);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        selectMasterResource(r.id);
+                        setManagerResourceCardId(r.id);
+                      }
+                    }}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "12px 12px",
+                      borderRadius: 14,
+                      border: "1px solid rgba(0,0,0,0.08)",
+                      background: "rgba(255,255,255,0.85)",
+                      boxShadow: "none",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      marginBottom: 10,
+                      userSelect: "none",
+                    }}
+                    onPointerEnter={(e) => {
+                      const el = e.currentTarget as HTMLDivElement;
+                      el.style.background = "rgba(0,114,49,0.08)";
+                      el.style.boxShadow = "inset 0 -3px 0 0 rgba(0,114,49,0.65)";
+                    }}
+                    onPointerLeave={(e) => {
+                      const el = e.currentTarget as HTMLDivElement;
+                      el.style.background = "rgba(255,255,255,0.85)";
+                      el.style.boxShadow = "none";
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 999,
+                        background: r.color,
+                        border: "1px solid rgba(0,0,0,0.10)",
+                        flex: "0 0 auto",
+                      }}
+                    />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 650, letterSpacing: -0.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {r.title}
+                      </div>
+                      <div style={{ fontSize: 12, opacity: 0.6, marginTop: 2 }}>
+                        {deptLabel(r.dept)}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Spawn an alias on the canvas, then switch to Workflow to complete assignment wiring.
+                        spawnAliasAndFocus(r.id);
+                      }}
+                      style={{
+                        ...pillBtn,
+                        marginLeft: 'auto',
+                        padding: "7px 10px",
+                        background: "white",
+                        borderColor: "rgba(0,0,0,0.12)",
+                        color: "rgba(0,0,0,0.72)",
+                      }}
+                      onPointerEnter={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement;
+                        el.style.background = "rgba(0,0,0,0.06)";
+                      }}
+                      onPointerLeave={(e) => {
+                        const el = e.currentTarget as HTMLButtonElement;
+                        el.style.background = "white";
+                      }}
+                    >
+                      assign
+                    </button>
+                  </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
 <div
   id="flow-shell"
   ref={flowShellRef}
-  style={{ width: '100vw', height: '100vh', overflow: 'hidden' }}
-  
+  onWheelCapture={(e) => {
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+
+    // don't hijack wheel over UI controls
+    const inUi = !!target.closest(
+      [
+        'input',
+        'textarea',
+        'select',
+        'option',
+        'button',
+        '[role="listbox"]',
+        '[role="option"]',
+        '[data-radix-popper-content-wrapper]',
+        '[data-radix-select-content]',
+        '.inspectorBody',
+      ].join(',')
+    );
+    if (inUi) return;
+
+    // pinch zoom (trackpad) uses ctrlKey — let ReactFlow handle it
+    if (e.ctrlKey) return;
+
+    // block horizontal swipe/nav
+    if (e.deltaX !== 0 || e.shiftKey) {
+      e.preventDefault();
+      return;
+    }
+
+    // wheel zoom for mouse / magic mouse
+    if (e.deltaY !== 0) {
+      e.preventDefault();
+
+      const rf = rfRef.current;
+      if (!rf) return;
+
+      // smooth-ish step, but instant
+      const step = 0.08;
+      const nextZoom = e.deltaY > 0 ? rf.getZoom() - step : rf.getZoom() + step;
+
+      rf.setViewport(
+        { x: rf.getViewport().x, y: rf.getViewport().y, zoom: nextZoom },
+        { duration: 0 }
+      );
+    }
+  }}
+  style={{ width: '100vw', height: '100vh', overflow: 'hidden', overscrollBehavior: 'none', opacity: isManager ? 0.22 : 1, pointerEvents: isManager ? 'none' : 'auto', transition: 'opacity 180ms ease' }}
 >
-<ReactFlow
+<ReactFlowProvider>
+  <ReactFlow
+  onInit={(inst) => {
+    rfRef.current = inst;
+  }}
   nodes={displayNodes}
-  edges={edges}
+  edges={displayEdges}
   nodeTypes={nodeTypes}
   onConnect={onConnect}
   onNodesChange={onNodesChange}
   onEdgesChange={onEdgesChange}
   onNodeClick={(_, node) => {
-    // clear edge selection when selecting a node
     selectEdge(null);
     selectNode(node.id);
   }}
   onEdgeClick={(_, edge) => {
-    // clear node selection when selecting an edge
     selectNode(null);
     selectEdge(edge.id);
   }}
   onPaneClick={() => {
-    // click empty canvas -> clear selection (baseline inspector)
     selectNode(null);
     selectEdge(null);
   }}
@@ -4430,9 +6608,10 @@ const masterTimelineItems = useMemo(() => {
   onEdgeUpdateEnd={handleEdgeUpdateEnd}
   edgeUpdaterRadius={18}
   panOnDrag={true}
-  panOnScroll={false}
-  zoomOnScroll={false}
+  panOnScroll={true}         // ✅ CHANGED: allow trackpad scroll to pan
+  zoomOnScroll={false}       // ✅ keep off (we handle mouse wheel zoom)
   zoomOnPinch={true}
+  zoomOnDoubleClick={false}
   preventScrolling={true}
   isValidConnection={() => true}
   defaultViewport={{ x: 0, y: 0, zoom: 0.75 }}
@@ -4440,7 +6619,9 @@ const masterTimelineItems = useMemo(() => {
   maxZoom={2.5}
   defaultEdgeOptions={{
     type: edgeMode === 'radius' ? 'smoothstep' : 'default',
-    markerEnd: { type: MarkerType.ArrowClosed },
+    ...(edgeMode === 'radius' ? ({ pathOptions: { borderRadius: edgeCornerRadius } } as any) : {}),
+    style: { strokeWidth: 2 },
+    markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
   }}
   connectionLineType={edgeMode === 'radius' ? ConnectionLineType.SmoothStep : ConnectionLineType.Bezier}
 >
@@ -4448,6 +6629,7 @@ const masterTimelineItems = useMemo(() => {
   <Controls />
   <Background />
 </ReactFlow>
+</ReactFlowProvider>
 </div>
 </div>
 )}

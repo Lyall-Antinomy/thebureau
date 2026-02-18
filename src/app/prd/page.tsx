@@ -83,7 +83,7 @@ export default function InvestorOnePager() {
           </p>
 
           <p className="text-sm leading-relaxed opacity-70">
-            Not task tracking. Not compliant accounting. Instead, a real-time, high-level view of critical studio ops - in live convesation with project organisms. 
+            Not task tracking. Not Accounting. Instead, a real-time, high-level view of critical studio ops - in live convesation with project organisms. 
             It surfaces risk and opportunity, and forces clarity on tradeoffs. 
           </p>
 
@@ -100,7 +100,9 @@ export default function InvestorOnePager() {
             <div className="space-y-2 text-sm opacity-80">
               <div>Studio operations live in fragments: Bloated PM tools (granular task managers), permissioned finance tools (sensitive accounting), mind-numbing spreadsheets (poor UX), and complex studio databases (noisy).</div>
               <div>Decisions slow down. Constraints are misinterpreted. Overload warning arrives too late. Margin becomes guesswork. 
-                Critical reporting must be reconstructed from fragmented data across a suite of permissioned operational apps and software.</div>
+                Critical reporting must be reconstructed from fragmented data across a suite of laborious operational apps and software. </div>
+                <div> Underneath it all sits a growing tax: stacked monthly subscriptions that quietly compound into overhead.
+                This pricing model is out of step with how modern studio teams actually build and run.</div>
             </div>
           </div>
         </section>
