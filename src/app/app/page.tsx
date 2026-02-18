@@ -114,7 +114,6 @@ type ProjectData = BaseNodeData & {
   kind: 'project';
   studio?: Studio;
   client?: string; // user input (shown in Project node + editable in inspector)
-  treeCollapsed?: boolean; // canvas-only filing toggle (hide/show connected nodes)
 };
 
 type BudgetPhase = 'design' | 'dev' | 'ops';
@@ -263,7 +262,6 @@ type GraphState = {
   updateAliasMeta: (id: string, patch: Partial<AliasData>) => void;
   updateProjectStudio: (id: string, studio: Studio) => void;
   updateProjectClient: (id: string, client: string) => void;
-  toggleProjectTreeCollapsed: (projectId: string) => void;
 
   updateEdgeLabel: (id: string, label: string) => void;
   updateEdgeConnection: (edgeId: string, newConn: Connection) => void;
@@ -601,10 +599,7 @@ function isValidConnectionStrict(nodes: RFNode<GraphNodeData>[], c: Connection) 
   const sourceKind = getNodeKindById(nodes, c.source);
   const targetKind = getNodeKindById(nodes, c.target);
 
-  // Capacity → Person (capacity-only)
-  if (sourceKind === 'capacity' && targe(tKind === 'person' || tKind === 'alias')) {
-    return c.sourceHandle === 'capacity-out' && c.targetHandle === 'capacity-in';
-  }
+ 
 
   // Person → Project (project-only)
   if (sourceKind === 'person' && targetKind === 'project') {
@@ -2091,16 +2086,6 @@ updateProjectClient: (id, client) =>
     }),
   })),
 
-toggleProjectTreeCollapsed: (projectId) =>
-      set((s) => ({
-        nodes: s.nodes.map((n) => {
-          if (n.id !== projectId) return n;
-          if (n.data.kind !== 'project') return n;
-          const cur = Boolean((n.data as any).treeCollapsed);
-          return { ...n, data: { ...(n.data as ProjectData), treeCollapsed: !cur } };
-        }),
-      })),
-
     updateTimelineDates: (id, patch) =>
       set((s) => ({
         nodes: s.nodes.map((n) => {
@@ -2267,8 +2252,6 @@ function AliasNode({ data }: { id: string; data: GraphNodeData }) {
   // Live truth: Alias display pulls from the Master Resource record.
   // Alias keeps only per-assignment financial/linkage data.
   const masterResources = useGraph((s) => s.masterResources);
-  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
-  const treeCollapsed = Boolean((data as any).treeCollapsed);
   const mr = masterResources.find((r) => r.id === (data as any).masterResourceId) ?? null;
 
   const compModel = (mr?.compModel ?? (data as any).compModel) as 'Full time' | 'External';
@@ -2329,8 +2312,6 @@ function CapacityNode({ id, data }: { id: string; data: GraphNodeData }) {
   const nodes = useGraph((s) => s.nodes);
   const edges = useGraph((s) => s.edges);
   const masterResources = useGraph((s) => s.masterResources);
-  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
-  const treeCollapsed = Boolean((data as any).treeCollapsed);
 
   const personEdge = edges.find((e) => e.source === id && getNodeKindById(nodes, e.target) === 'person');
   const personId = personEdge?.target ?? null;
@@ -2560,8 +2541,6 @@ function ProjectNodeBase({ id, data }: { id: string; data: GraphNodeData }) {
   const nodes = useGraph((s) => s.nodes);
   const edges = useGraph((s) => s.edges);
   const masterResources = useGraph((s) => s.masterResources);
-  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
-  const treeCollapsed = Boolean((data as any).treeCollapsed);
 
   // computed ONLY from budgets connected to THIS project
   const { gross, net, budgetCount, signedCount } = computeProjectBudgetTotals(nodes, edges, id);
@@ -2664,11 +2643,6 @@ function ProjectNodeBase({ id, data }: { id: string; data: GraphNodeData }) {
         padding: 18,
       })}
     >
-      {/* Filing toggle (hide/show connected nodes) */}
-      <div style={{ position: 'absolute', top: 14, right: 14, zIndex: 3 }}>
-        <BureauToggle on={!treeCollapsed} onToggle={() => toggleProjectTreeCollapsed(id)} label="" />
-      </div>
-
       {/* Handles */}
       {PROJECT_TEAM_PORTS.map((p) => (
         <Handle
@@ -2927,6 +2901,7 @@ function ProjectNodeBase({ id, data }: { id: string; data: GraphNodeData }) {
 // Keep both exports so you can switch nodeTypes between them.
 function ProjectNodeV2({ id, data }: { id: string; data: GraphNodeData }) {
   return <ProjectNodeBase id={id} data={data} />;
+  
 }
 
 function ProjectNodeV1({ id, data }: { id: string; data: GraphNodeData }) {
@@ -2939,8 +2914,6 @@ function BudgetNode({ id, data, selected }: NodeProps<GraphNodeData>) {
   const nodes = useGraph((s) => s.nodes);
   const edges = useGraph((s) => s.edges);
   const masterResources = useGraph((s) => s.masterResources);
-  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
-  const treeCollapsed = Boolean((data as any).treeCollapsed);
 
   const computed = computeBudgetNetForBudgetNode(nodes, edges, id);
   const grossTotal = computed?.grossTotal ?? budgetTotal(data);
@@ -3165,8 +3138,6 @@ function TurnoverNode({ id, data }: { id: string; data: GraphNodeData }) {
   const nodes = useGraph((s) => s.nodes);
   const edges = useGraph((s) => s.edges);
   const masterResources = useGraph((s) => s.masterResources);
-  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
-  const treeCollapsed = Boolean((data as any).treeCollapsed);
 
   const incomingBudgetIds = edges.filter((e) => e.target === id).map((e) => e.source).filter(Boolean);
 
@@ -3247,8 +3218,6 @@ function LedgerNode({ id, data }: { id: string; data: GraphNodeData }) {
   const nodes = useGraph((s) => s.nodes);
   const edges = useGraph((s) => s.edges);
   const masterResources = useGraph((s) => s.masterResources);
-  const toggleProjectTreeCollapsed = useGraph((s) => s.toggleProjectTreeCollapsed);
-  const treeCollapsed = Boolean((data as any).treeCollapsed);
 
   // ✅ Pull ALL budget nodes (no wiring required)
   const allBudgetIds = nodes
@@ -4309,56 +4278,16 @@ const manualSave = useCallback(() => {
   );
 
   const wiredNodes = useMemo(() => nodes.map((n) => ({ ...n, type: reactFlowTypeForNode(n.data.kind) })), [nodes, edges, scrubDate]);
+  const displayNodes = useMemo(() => {
 
-  // Project filing: when a project is collapsed, hide its directly connected alias/budget/timeline nodes + edges (visual-only)
-  const hiddenNodeIds = useMemo(() => {
-    const collapsed = new Set(
-      nodes
-        .filter((n) => n.data.kind === 'project' && Boolean((n.data as any).treeCollapsed))
-        .map((n) => n.id)
-    );
+    
 
-    const hidden = new Set();
-    if (collapsed.size === 0) return hidden;
-
-    for (const e of edges) {
-      // Hide aliases assigned to this project
-      if (e.type === 'assignment' && e.target && collapsed.has(e.target)) {
-        const src = nodes.find((n) => n.id === e.source);
-        if (src && src.data && src.data.kind === 'alias') hidden.add(e.source);
-      }
-
-      // Hide budgets/timelines directly connected from the project
-      if (e.source && collapsed.has(e.source) && (e.sourceHandle === 'budget' || e.sourceHandle === 'timeline')) {
-        const tgt = nodes.find((n) => n.id === e.target);
-        if (tgt && tgt.data && (tgt.data.kind === 'budget' || tgt.data.kind === 'timeline')) hidden.add(e.target);
-      }
-    }
-
-    return hidden;
-  }, [nodes, edges]);
-
-const displayNodes = useMemo(() => {
   const FADED = 0.15;
   const SOFT = 0.45;
   const FULL = 1;
   const PAD_DAYS = 14;
 
-  function applyHidden(n: any) {
-    return {
-      ...n,
-      draggable: false,
-      selectable: false,
-      connectable: false,
-      style: {
-        ...(n.style || {}),
-        opacity: 0,
-        pointerEvents: 'none',
-        transition: 'opacity 160ms ease',
-      },
-    };
-  }
-
+  
 
   function addDays(d: Date, days: number) {
     const x = new Date(d);
@@ -4406,6 +4335,28 @@ const displayNodes = useMemo(() => {
     );
     return ownerEdge?.source ?? null;
   }
+
+function isAssignmentEdgeToProject(edge: any, projectId: string) {
+  const isAssignment = (edge?.data as any)?.edgeType === 'assignment';
+  if (!isAssignment) return false;
+  // alias -> project direction
+  return edge.target === projectId && getNodeKindById(nodes, edge.target) === 'project';
+}
+
+function assignedProjectIdForAlias(aliasId: string) {
+  const edge = edges.find((e) => {
+    if (e.source !== aliasId) return false;
+    const isAssignment = (e.data as any)?.edgeType === 'assignment';
+    return isAssignment && getNodeKindById(nodes, e.target) === 'project';
+  });
+  return edge?.target ?? null;
+}
+
+function isProjectCollapsed(projectId: string) {
+  const p = nodes.find((n) => n.id === projectId);
+  if (!p) return false;
+  return Boolean((p.data as any)?.treeCollapsed);
+}
 
   // --- Dock / Clip visual state (purely visual, no graph logic changes) ---
   const dockMap = new Map<string, { top: boolean; bottom: boolean }>();
@@ -4470,7 +4421,6 @@ const displayNodes = useMemo(() => {
 
   return wiredNodes.map((n) => {
     const kind = n.data?.kind;
-    const isHidden = kind !== 'project' && hiddenNodeIds.has(n.id);
 
     // Inject dock flags (visual-only). Non-dockables get null.
     const dock =
@@ -4480,46 +4430,32 @@ const displayNodes = useMemo(() => {
 
     // always solid
     if (kind === 'person' || kind === 'alias' || kind === 'capacity') {
-      const base = dock ? { ...n, data: { ...(n.data as any), dock } } : n;
-      return isHidden ? applyHidden(base) : base;
+      return dock ? { ...n, data: { ...(n.data as any), dock } } : n;
     }
     if (String(kind).includes('turnover')) {
-      const base = dock ? { ...n, data: { ...(n.data as any), dock } } : n;
-      return isHidden ? applyHidden(base) : base;
+      return dock ? { ...n, data: { ...(n.data as any), dock } } : n;
     }
 
     if (kind === 'project') {
       const op = opacityForProject(n.id);
       const next = { ...n, style: { ...(n.style || {}), opacity: op } };
-      const base = dock ? { ...next, data: { ...(next.data as any), dock } } : next;
-      return isHidden ? applyHidden(base) : base;
+      return dock ? { ...next, data: { ...(next.data as any), dock } } : next;
     }
 
     if (kind === 'budget' || kind === 'timeline') {
       const pid = ownerProjectId(n.id);
       const op = pid ? opacityForProject(pid) : FULL;
 
-      const base = {
+      return {
         ...n,
         data: { ...(n.data as any), dock },
         style: { ...(n.style || {}), opacity: op },
       };
-      return isHidden ? applyHidden(base) : base;
     }
 
-    const base = dock ? { ...n, data: { ...(n.data as any), dock } } : n;
-      return isHidden ? applyHidden(base) : base;
+    return dock ? { ...n, data: { ...(n.data as any), dock } } : n;
   });
 }, [wiredNodes, nodes, edges, scrubDate]);
-
-const displayEdges = useMemo(() => {
-  if (!hiddenNodeIds || hiddenNodeIds.size === 0) return edges.map((e) => ({ ...e, hidden: false }));
-  return edges.map((e) => {
-    const hide = hiddenNodeIds.has(e.source) || hiddenNodeIds.has(e.target);
-    return hide ? ({ ...e, hidden: true }) : ({ ...e, hidden: false });
-  });
-}, [edges, hiddenNodeIds]);
-
 
 const isValidConnection = useCallback(
   (c: Connection) => isValidConnectionStrict(nodes, c),
@@ -6586,7 +6522,7 @@ const masterTimelineItems = useMemo(() => {
     rfRef.current = inst;
   }}
   nodes={displayNodes}
-  edges={displayEdges}
+  edges={edges}
   nodeTypes={nodeTypes}
   onConnect={onConnect}
   onNodesChange={onNodesChange}
